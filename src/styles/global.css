@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+/*
+  Tokens de marca. Reutilizamos la misma paleta del proyecto anterior
+  (AtlixcoVive) para mantener identidad visual entre versiones.
+  Si quieres una paleta nueva, este es el único lugar que hay que tocar.
+*/
+@theme {
+  --color-ar-oxford: #000022;
+  --color-ar-oxford-disabled: #474766;
+  --color-ar-oxford-hover: #000018;
+
+  --color-ar-cerulean: #007991;
+  --color-ar-cerulean-disabled: #bce8f1;
+  --color-ar-cerulean-hover: #1e6877;
+
+  --color-ar-saffron: #eac435;
+  --color-ar-platinum: #e8e8e8;
+
+  --color-ar-folly: #ff3366;
+  --color-ar-folly-hover: #c23055;
+  --color-ar-folly-disabled: #fac9d5;
+}
+
+body {
+  @apply bg-ar-platinum text-ar-oxford antialiased;
+}

@@ -1,0 +1,68 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+
+// A partir del Paso 3, un middleware llenará Astro.locals.user
+// (id, email, role, name) leyendo la cookie de sesión. Por ahora
+// queda en null para no romper el layout mientras se construye.
+const user = Astro.locals.user ?? null;
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} · Atlixbus</title>
+  </head>
+  <body class="min-h-screen flex flex-col">
+    <header class="bg-ar-oxford text-white">
+      <div class="container mx-auto px-4 h-16 flex items-center justify-between">
+        <a href="/" class="font-bold text-lg">Atlixbus</a>
+
+        <nav class="flex items-center gap-6 text-sm font-semibold">
+          <a href="/">Inicio</a>
+
+          {user && (
+            <a href="/perfil">Perfil</a>
+          )}
+
+          {user?.role === 'ADMIN' && (
+            <a href="/admin">Administración</a>
+          )}
+
+          {user ? (
+            <form method="POST" action="/api/auth/logout">
+              <button
+                type="submit"
+                class="cursor-pointer px-3 py-1 bg-ar-folly rounded-md hover:bg-ar-folly-hover"
+              >
+                Cerrar sesión
+              </button>
+            </form>
+          ) : (
+            <a
+              href="/login"
+              class="px-3 py-1 bg-ar-saffron text-ar-oxford rounded-md hover:bg-ar-cerulean hover:text-white transition-colors"
+            >
+              Iniciar sesión
+            </a>
+          )}
+        </nav>
+      </div>
+    </header>
+
+    <main class="flex-1 container mx-auto px-4 py-8">
+      <slot />
+    </main>
+
+    <footer class="text-center text-sm text-ar-oxford-disabled py-6">
+      &copy; {new Date().getFullYear()} Atlixbus
+    </footer>
+  </body>
+</html>

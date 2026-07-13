@@ -1,0 +1,15 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { requireRole } from '../../lib/guards.js';
+
+const guardResponse = requireRole(Astro, 'ADMIN');
+if (guardResponse) return guardResponse;
+---
+
+<BaseLayout title="Administración">
+  <h1 class="text-2xl font-bold">Panel de administración</h1>
+  <p class="text-ar-oxford-disabled">
+    Solo visible para usuarios con rol ADMIN. Si ves esta página, el
+    control de acceso por rol está funcionando.
+  </p>
+</BaseLayout>

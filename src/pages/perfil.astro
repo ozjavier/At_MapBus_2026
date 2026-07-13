@@ -1,0 +1,25 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { requireUser } from '../lib/guards.js';
+
+const guardResponse = requireUser(Astro);
+if (guardResponse) return guardResponse;
+
+const user = Astro.locals.user;
+---
+
+<BaseLayout title="Perfil">
+  <h1 class="text-2xl font-bold mb-4">Mi perfil</h1>
+
+  <div class="bg-white rounded-lg shadow-sm p-6 max-w-md flex flex-col gap-2">
+    <p><span class="font-semibold">Nombre:</span> {user.name ?? '—'}</p>
+    <p><span class="font-semibold">Correo:</span> {user.email}</p>
+    <p><span class="font-semibold">Rol:</span> {user.role}</p>
+  </div>
+
+  <p class="text-sm text-ar-oxford-disabled mt-4">
+    Esta es una vista de prueba para confirmar que la sesión y el rol
+    llegan bien desde la base de datos. La edición de estos datos y el
+    cambio de contraseña se agregan en el Paso 4.
+  </p>
+</BaseLayout>
