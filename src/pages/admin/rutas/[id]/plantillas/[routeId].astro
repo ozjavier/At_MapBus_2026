@@ -105,12 +105,18 @@ const referenceRouteJson = JSON.stringify(activeTemplate?.points ?? null);
           paradas de pasajeros). Ctrl+Z / Ctrl+Y para deshacer/rehacer.
         </p>
 
+        <label class="flex items-center gap-2 text-sm mb-2 cursor-pointer select-none">
+          <input type="checkbox" id="loop-toggle" />
+          Ruta en bucle (conecta el último punto con el primero)
+        </label>
+
         <div
           id="template-editor-root"
-          data-group-id={groupId}
-          data-route-id={routeId}
-          data-initial-points={initialPointsJson}
-          data-reference-route={referenceRouteJson}
+            data-group-id={groupId}
+            data-route-id={routeId}
+            data-initial-points={initialPointsJson}
+            data-reference-route={referenceRouteJson}
+          + data-is-loop={String(template.is_loop ?? false)}
           class="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-4"
         >
           <!-- Columna del mapa -->
@@ -366,29 +372,39 @@ const referenceRouteJson = JSON.stringify(activeTemplate?.points ?? null);
   // intente resolverlo nativamente y falle.
   import { RoutePointsEditor } from '../../../../../lib/client/routePointsEditor.js';
 
-  const root = document.getElementById('template-editor-root');
-  const groupId = root?.dataset.groupId;
-  const routeId = root?.dataset.routeId;
-  const initialPoints = JSON.parse(root?.dataset.initialPoints || '[]');
-  const referenceRoutePoints = JSON.parse(root?.dataset.referenceRoute || 'null');
+const root = document.getElementById('template-editor-root');
+const groupId = root?.dataset.groupId;
+const routeId = root?.dataset.routeId;
+const initialPoints = JSON.parse(root?.dataset.initialPoints || '[]');
+const referenceRoutePoints = JSON.parse(root?.dataset.referenceRoute || 'null');
+const initialIsLoop = root?.dataset.isLoop === 'true';
 
-  const form = document.getElementById('template-form');
-  const errorEl = document.getElementById('form-error');
-  const successEl = document.getElementById('form-success');
-  const mapErrorEl = document.getElementById('map-error');
+const form = document.getElementById('template-form');
+const errorEl = document.getElementById('form-error');
+const successEl = document.getElementById('form-success');
+const mapErrorEl = document.getElementById('map-error');
 
-  let pointsEditor;
-  try {
-    pointsEditor = new RoutePointsEditor({
-      mapContainer: document.getElementById('points-map'),
-      listContainer: document.getElementById('points-list'),
-      initialPoints,
-      referenceRoute: referenceRoutePoints,
-    });
-  } catch (err) {
-    console.error('[RoutePointsEditor] No se pudo inicializar el mapa:', err);
-    mapErrorEl?.classList.remove('hidden');
-  }
+let pointsEditor;
+try {
+  pointsEditor = new RoutePointsEditor({
+    mapContainer: document.getElementById('points-map'),
+    listContainer: document.getElementById('points-list'),
+    initialPoints,
+    referenceRoute: referenceRoutePoints,
+    isLoop: initialIsLoop,
+  });
+} catch (err) {
+  console.error('[RoutePointsEditor] No se pudo inicializar el mapa:', err);
+  mapErrorEl?.classList.remove('hidden');
+}
+
+const loopToggle = document.getElementById('loop-toggle');
+if (loopToggle) {
+  loopToggle.checked = pointsEditor?.getIsLoop() ?? initialIsLoop; // ahora si con pointsEditor ya creado
+  loopToggle.addEventListener('change', (e) => {
+    pointsEditor?.setLoop(e.target.checked);
+  });
+}
 
   document.getElementById('btn-add-manual-point')?.addEventListener('click', () => {
     const lat = Number(document.getElementById('manual-lat')?.value);
@@ -431,6 +447,7 @@ const referenceRouteJson = JSON.stringify(activeTemplate?.points ?? null);
         reason: data.get('reason') || undefined,
         description: data.get('description') || undefined,
         points,
+        isLoop: pointsEditor?.getIsLoop() ?? false,
         farePrice: data.get('farePrice') ? Number(data.get('farePrice')) : null,
         scheduleStart: data.get('scheduleStart') || null,
         scheduleEnd: data.get('scheduleEnd') || null,
