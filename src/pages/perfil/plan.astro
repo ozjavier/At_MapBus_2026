@@ -1,0 +1,47 @@
+---
+import ProfileLayout from '../../layouts/ProfileLayout.astro';
+import { requireUser } from '../../lib/guards.js';
+
+const guardResponse = requireUser(Astro);
+if (guardResponse) return guardResponse;
+---
+
+<ProfileLayout title="Plan" active="plan">
+  <h1 class="text-2xl font-bold mb-1">Tu Plan</h1>
+  <p class="text-sm text-ar-oxford-disabled mb-6">
+    La gestión de planes y pagos todavía no está conectada. Esta vista es
+    de referencia visual mientras se integra Stripe.
+  </p>
+
+  <div class="border border-ar-cerulean-disabled rounded-lg p-6 max-w-md">
+    <div class="flex justify-between items-start">
+      <div>
+        <p class="text-xs font-semibold text-ar-oxford-disabled uppercase">Plan actual</p>
+        <p class="text-xl font-bold text-ar-cerulean">Gratuito</p>
+      </div>
+      <span class="text-xs font-semibold bg-ar-cerulean-disabled text-ar-cerulean-hover px-2 py-1 rounded-full">
+        Activo
+      </span>
+    </div>
+
+    <ul class="mt-4 text-sm text-ar-oxford-disabled list-disc pl-5 space-y-1">
+      <li>Consulta de rutas y horarios</li>
+      <li>Rastreo en tiempo real</li>
+      <li>Notificaciones básicas</li>
+    </ul>
+
+    <button
+      type="button"
+      disabled
+      title="Disponible próximamente"
+      class="mt-6 w-full bg-ar-oxford-disabled text-white rounded-md py-2 font-semibold opacity-60 cursor-not-allowed"
+    >
+      Mejorar plan (próximamente)
+    </button>
+  </div>
+
+  <p class="text-sm text-ar-oxford-disabled mt-6 max-w-md">
+    Cuando se habilite la facturación, aquí podrás cambiar de plan y
+    administrar tu método de pago directamente con Stripe.
+  </p>
+</ProfileLayout>

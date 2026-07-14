@@ -1,0 +1,146 @@
+---
+import ProfileLayout from '../../layouts/ProfileLayout.astro';
+import { requireUser } from '../../lib/guards.js';
+import { getNotificationPreferences } from '../../lib/profile.js';
+
+const guardResponse = requireUser(Astro);
+if (guardResponse) return guardResponse;
+
+const prefs = await getNotificationPreferences(Astro.locals.user.id);
+
+const sections = [
+  {
+    key: 'system',
+    title: 'Notificaciones del Sistema',
+    description: 'Avisos generales y mantenimiento de la plataforma.',
+    items: [
+      { field: 'systemBrowser', label: 'Navegador', hint: 'Recibir alertas en el navegador' },
+      { field: 'systemEmail', label: 'Correo Electrónico', hint: 'Recibir alertas por correo' },
+    ],
+  },
+  {
+    key: 'plan',
+    title: 'Notificaciones de Plan',
+    description: 'Cambios o vencimiento de tu plan y facturación.',
+    items: [
+      { field: 'planBrowser', label: 'Navegador', hint: 'Alertas sobre tu plan en el navegador' },
+      { field: 'planEmail', label: 'Correo Electrónico', hint: 'Emails sobre tu plan y facturación' },
+    ],
+  },
+  {
+    key: 'routeChanges',
+    title: 'Notificaciones de Rutas',
+    description: 'Cambios en las rutas y alternativas disponibles.',
+    items: [
+      { field: 'routeChangesBrowser', label: 'Navegador', hint: 'Alertas sobre modificaciones en rutas' },
+      { field: 'routeChangesEmail', label: 'Correo Electrónico', hint: 'Emails sobre modificaciones en rutas' },
+    ],
+  },
+  {
+    key: 'marketing',
+    title: 'Notificaciones de Marketing',
+    description: 'Ofertas, novedades y mejoras del servicio.',
+    items: [
+      { field: 'marketingBrowser', label: 'Navegador', hint: 'Recibir ofertas y novedades' },
+      { field: 'marketingEmail', label: 'Correo Electrónico', hint: 'Recibir ofertas y novedades por correo' },
+    ],
+  },
+];
+---
+
+<ProfileLayout title="Notificaciones" active="notificaciones">
+  <div class="flex flex-wrap justify-between items-center gap-4 mb-2">
+    <div>
+      <h1 class="text-2xl font-bold">Configuración de Notificaciones</h1>
+      <p class="text-sm text-ar-oxford-disabled mt-1">
+        Elige qué avisos quieres recibir y por qué medio.
+      </p>
+    </div>
+    <button
+      type="submit"
+      form="notifications-form"
+      class="cursor-pointer bg-ar-cerulean text-white rounded-md px-5 py-2.5 font-semibold hover:bg-ar-cerulean-hover transition-colors shrink-0"
+    >
+      Guardar Preferencias
+    </button>
+  </div>
+
+  <p id="notifications-error" class="text-ar-folly text-sm hidden mt-4"></p>
+  <p id="notifications-success" class="text-ar-cerulean text-sm hidden mt-4"></p>
+
+  <form id="notifications-form" class="flex flex-col gap-8 mt-6">
+    {sections.map((section) => (
+      <section>
+        <h2 class="text-lg font-bold">{section.title}</h2>
+        <p class="text-sm text-ar-oxford-disabled mb-3">{section.description}</p>
+
+        <div class="grid sm:grid-cols-2 gap-4">
+          {section.items.map((item) => (
+            <label class="flex items-center justify-between gap-4 border border-ar-cerulean-disabled rounded-lg p-4 cursor-pointer hover:border-ar-cerulean transition-colors">
+              <span>
+                <span class="block font-semibold">{item.label}</span>
+                <span class="block text-xs text-ar-oxford-disabled mt-0.5">{item.hint}</span>
+              </span>
+
+              <span class="relative inline-flex items-center shrink-0">
+                <input
+                  type="checkbox"
+                  name={item.field}
+                  checked={prefs[item.field]}
+                  class="peer sr-only"
+                />
+                <span class="w-11 h-6 bg-ar-platinum border border-ar-cerulean-disabled rounded-full peer-checked:bg-ar-cerulean peer-checked:border-ar-cerulean transition-colors"></span>
+                <span class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform peer-checked:translate-x-5"></span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </section>
+    ))}
+  </form>
+</ProfileLayout>
+
+<script>
+  const form = document.getElementById('notifications-form') as HTMLFormElement | null;
+  const errorEl = document.getElementById('notifications-error');
+  const successEl = document.getElementById('notifications-success');
+
+  const keys = [
+    'systemBrowser', 'systemEmail',
+    'planBrowser', 'planEmail',
+    'routeChangesBrowser', 'routeChangesEmail',
+    'marketingBrowser', 'marketingEmail',
+  ];
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl?.classList.add('hidden');
+    successEl?.classList.add('hidden');
+
+    const body: Record<string, boolean> = {};
+    for (const key of keys) {
+      const input = form.elements.namedItem(key) as HTMLInputElement | null;
+      body[key] = !!input?.checked;
+    }
+
+    const res = await fetch('/api/perfil/notificaciones', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (errorEl) {
+        errorEl.textContent = data.error || 'No se pudieron guardar tus preferencias';
+        errorEl.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (successEl) {
+      successEl.textContent = 'Preferencias guardadas';
+      successEl.classList.remove('hidden');
+    }
+  });
+</script>

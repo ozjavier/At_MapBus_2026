@@ -1,0 +1,241 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { requireRole } from '../../../lib/guards.js';
+
+const guardResponse = requireRole(Astro, 'ADMIN');
+if (guardResponse) return guardResponse;
+---
+
+<BaseLayout title="Nueva ruta">
+  <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-sm p-6">
+    <h1 class="text-2xl font-bold text-ar-oxford mb-1">Nueva ruta</h1>
+    <p class="text-ar-oxford-disabled mb-6">
+      Se crea el grupo y su primera plantilla ("Default"). Los puntos del
+      trazado se cargan como JSON por ahora; el editor visual sobre mapa se
+      conecta en un paso posterior reutilizando el componente existente.
+    </p>
+
+    <form id="new-group-form" class="flex flex-col gap-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-semibold mb-1" for="routeNumber">Numero de ruta</label>
+          <input
+            id="routeNumber"
+            name="routeNumber"
+            required
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1" for="name">Nombre</label>
+          <input
+            id="name"
+            name="name"
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm font-semibold mb-1" for="description">Descripcion</label>
+        <textarea
+          id="description"
+          name="description"
+          rows="2"
+          class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+        ></textarea>
+      </div>
+
+      <hr class="my-2" />
+
+      <h2 class="font-semibold text-ar-oxford">Plantilla "Default"</h2>
+
+      <div>
+        <label class="block text-sm font-semibold mb-1">Trazado de la ruta</label>
+        <p class="text-xs text-ar-oxford-disabled mb-2">
+          Haz clic en el mapa para agregar puntos en orden. Arrastra un marcador
+          para ajustarlo, usa las flechas de la lista para reordenar, y marca
+          "Omitir parada" para los puntos que solo definen el trazado (no son
+          paradas de pasajeros). Ctrl+Z / Ctrl+Y para deshacer/rehacer.
+        </p>
+
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)] gap-4">
+          <div>
+            <div id="points-map" class="w-full h-[480px] rounded-md border border-ar-cerulean-disabled bg-gray-50"></div>
+            <p id="map-error" class="text-xs text-ar-folly mt-1 hidden">
+              No se pudo iniciar el mapa. Revisa la consola del navegador (F12).
+            </p>
+          </div>
+
+          <div class="flex flex-col h-[480px]">
+            <div class="bg-gray-50 rounded-md p-2 mb-2 space-y-2">
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-xs font-semibold mb-1" for="manual-lat">Lat</label>
+                  <input id="manual-lat" type="number" step="any" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold mb-1" for="manual-lng">Lng</label>
+                  <input id="manual-lng" type="number" step="any" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-add-manual-point"
+                class="cursor-pointer w-full px-3 py-1.5 bg-gray-200 rounded-md text-sm font-semibold hover:bg-gray-300"
+              >
+                Agregar punto manual
+              </button>
+              <button
+                type="button"
+                id="btn-clear-points"
+                class="cursor-pointer w-full text-ar-folly text-sm font-semibold hover:underline"
+              >
+                Limpiar puntos
+              </button>
+            </div>
+
+            <div id="points-list" class="flex-1 overflow-auto border border-ar-cerulean-disabled rounded-md"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-semibold mb-1" for="farePrice">Tarifa base</label>
+          <input
+            id="farePrice"
+            name="farePrice"
+            type="number"
+            step="0.5"
+            min="0"
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1" for="scheduleStart">Inicio operacion</label>
+          <input
+            id="scheduleStart"
+            name="scheduleStart"
+            type="time"
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1" for="scheduleEnd">Fin operacion</label>
+          <input
+            id="scheduleEnd"
+            name="scheduleEnd"
+            type="time"
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+      </div>
+
+      <p id="form-error" class="text-ar-folly text-sm hidden"></p>
+
+      <button
+        type="submit"
+        class="cursor-pointer bg-ar-cerulean text-white rounded-md py-2 font-semibold hover:bg-ar-cerulean-hover transition-colors"
+      >
+        Crear ruta
+      </button>
+    </form>
+  </div>
+</BaseLayout>
+
+<script>
+  import { RoutePointsEditor } from '../../../lib/client/routePointsEditor.js';
+
+  const form = document.getElementById('new-group-form') as HTMLFormElement | null;
+  const errorEl = document.getElementById('form-error');
+  const mapErrorEl = document.getElementById('map-error');
+
+  function showError(message: string) {
+    if (!errorEl) return;
+    errorEl.textContent = message;
+    errorEl.classList.remove('hidden');
+  }
+
+  let pointsEditor: RoutePointsEditor | undefined;
+  try {
+    pointsEditor = new RoutePointsEditor({
+      mapContainer: document.getElementById('points-map'),
+      listContainer: document.getElementById('points-list'),
+      initialPoints: [],
+    });
+  } catch (err) {
+    console.error('[RoutePointsEditor] No se pudo inicializar el mapa:', err);
+    mapErrorEl?.classList.remove('hidden');
+  }
+
+  document.getElementById('btn-add-manual-point')?.addEventListener('click', () => {
+    const lat = Number((document.getElementById('manual-lat') as HTMLInputElement)?.value);
+    const lng = Number((document.getElementById('manual-lng') as HTMLInputElement)?.value);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      showError('Lat/Lng manual invalidos');
+      return;
+    }
+    pointsEditor?.addPoint({ lat, lng, skipStop: false });
+  });
+
+  document.getElementById('btn-clear-points')?.addEventListener('click', () => {
+    pointsEditor?.clearAll();
+  });
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl?.classList.add('hidden');
+
+    const points = pointsEditor?.getPoints() ?? [];
+    if (points.length < 2) {
+      showError('Traza al menos 2 puntos en el mapa');
+      return;
+    }
+
+    const data = new FormData(form);
+
+    const groupRes = await fetch('/api/route-groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        routeNumber: data.get('routeNumber'),
+        name: data.get('name') || undefined,
+        description: data.get('description') || undefined,
+      }),
+    });
+
+    if (!groupRes.ok) {
+      const err = await groupRes.json().catch(() => ({}));
+      showError(err.error || 'No se pudo crear el grupo');
+      return;
+    }
+
+    const { id: groupId } = await groupRes.json();
+
+    const templateRes = await fetch(`/api/route-groups/${groupId}/templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label: 'Default',
+        points,
+        farePrice: data.get('farePrice') ? Number(data.get('farePrice')) : null,
+        scheduleStart: data.get('scheduleStart') || null,
+        scheduleEnd: data.get('scheduleEnd') || null,
+      }),
+    });
+
+    if (!templateRes.ok) {
+      const err = await templateRes.json().catch(() => ({}));
+      showError(err.error || 'Grupo creado, pero fallo la plantilla default');
+      return;
+    }
+
+    const { id: templateId } = await templateRes.json();
+
+    // La plantilla recien creada se marca como default del grupo.
+    await fetch(`/api/route-groups/${groupId}/templates/${templateId}/set-default`, { method: 'PATCH' });
+
+    window.location.href = `/admin/rutas/${groupId}`;
+  });
+</script>

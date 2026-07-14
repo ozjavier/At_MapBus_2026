@@ -1,0 +1,23 @@
+---
+import ProfileLayout from '../../layouts/ProfileLayout.astro';
+import { requireUser } from '../../lib/guards.js';
+
+const guardResponse = requireUser(Astro);
+if (guardResponse) return guardResponse;
+---
+
+<ProfileLayout title="Recibos" active="recibos">
+  <h1 class="text-2xl font-bold mb-1">Recibos</h1>
+  <p class="text-sm text-ar-oxford-disabled mb-6">
+    Todavía no hay pagos conectados a tu cuenta. En cuanto se integre
+    Stripe, tus recibos aparecerán listados aquí.
+  </p>
+
+  <div class="border border-dashed border-ar-cerulean-disabled rounded-lg p-10 text-center text-ar-oxford-disabled max-w-2xl">
+    <p class="font-semibold">Sin recibos por el momento</p>
+    <p class="text-sm mt-1">
+      Los recibos de tus pagos se generarán automáticamente y podrás
+      descargarlos en formato PDF desde aquí.
+    </p>
+  </div>
+</ProfileLayout>

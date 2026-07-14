@@ -1,0 +1,54 @@
+---
+import BaseLayout from './BaseLayout.astro';
+
+interface Props {
+  title: string;
+  active: 'cuenta' | 'plan' | 'notificaciones' | 'recibos';
+}
+
+const { title, active } = Astro.props;
+
+const navItems = [
+  { key: 'cuenta', href: '/perfil', label: 'Mi Cuenta' },
+  { key: 'plan', href: '/perfil/plan', label: 'Plan' },
+  { key: 'notificaciones', href: '/perfil/notificaciones', label: 'Notificaciones' },
+  { key: 'recibos', href: '/perfil/recibos', label: 'Recibos' },
+];
+---
+
+<BaseLayout title={title}>
+  <div class="bg-white rounded-lg shadow-sm grid md:grid-cols-4 min-h-[32rem]">
+    <nav class="md:col-span-1 border-b md:border-b-0 md:border-r border-ar-cerulean-disabled p-4">
+      <ul class="flex md:flex-col gap-1 overflow-x-auto md:overflow-visible">
+        {navItems.map((item) => (
+          <li>
+            <a
+              href={item.href}
+              class={`block whitespace-nowrap px-3 py-2 rounded-md text-sm font-semibold transition-colors ${
+                active === item.key
+                  ? 'bg-ar-cerulean-disabled text-ar-cerulean-hover'
+                  : 'text-ar-oxford-disabled hover:bg-ar-platinum'
+              }`}
+            >
+              {item.label}
+            </a>
+          </li>
+        ))}
+        <li class="md:mt-4">
+          <form method="POST" action="/api/auth/logout">
+            <button
+              type="submit"
+              class="cursor-pointer block w-full text-left whitespace-nowrap px-3 py-2 rounded-md text-sm font-semibold text-ar-folly hover:bg-ar-folly-disabled transition-colors"
+            >
+              Cerrar sesión
+            </button>
+          </form>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="md:col-span-3 p-6">
+      <slot />
+    </div>
+  </div>
+</BaseLayout>

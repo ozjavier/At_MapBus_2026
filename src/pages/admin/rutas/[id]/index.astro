@@ -1,0 +1,448 @@
+---
+import BaseLayout from '../../../../layouts/BaseLayout.astro';
+import { requireRole } from '../../../../lib/guards.js';
+import { getGroupById, getActivationLog } from '../../../../lib/routeGroups.js';
+import { listTemplates } from '../../../../lib/routeTemplates.js';
+import { listRules } from '../../../../lib/scheduleRules.js';
+
+const guardResponse = requireRole(Astro, 'ADMIN');
+if (guardResponse) return guardResponse;
+
+const groupId = Astro.params.id as string;
+const group = await getGroupById(groupId);
+
+if (!group) {
+  return new Response('Ruta no encontrada', { status: 404 });
+}
+
+const templates = await listTemplates(groupId);
+const rules = await listRules(groupId);
+const logs = await getActivationLog(groupId, { limit: 20 });
+
+const dayLabels = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+---
+
+<BaseLayout title={`Ruta ${group.route_number}`}>
+  <div class="mb-6">
+    <a href="/admin/rutas" class="text-sm text-ar-cerulean hover:underline">&larr; Todas las rutas</a>
+    <div class="flex items-center justify-between mt-2">
+      <div>
+        <h1 class="text-2xl font-bold text-ar-oxford">
+          Ruta {group.route_number} {group.name ? `\u2014 ${group.name}` : ''}
+        </h1>
+        <p class="text-ar-oxford-disabled">{group.description ?? 'Sin descripcion'}</p>
+      </div>
+      {group.is_manually_locked && (
+        <span class="px-3 py-1 rounded-full bg-ar-folly/10 text-ar-folly font-semibold text-sm">
+          Bloqueada manualmente
+        </span>
+      )}
+    </div>
+  </div>
+
+  <!-- Barra de emergencia -->
+  <section class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6" data-group-id={group.id}>
+    <h2 class="font-semibold text-ar-folly mb-3">Control en vivo / emergencia</h2>
+    <div class="flex flex-wrap items-center gap-3">
+      <select
+        id="emergency-template-select"
+        class="border border-red-300 rounded-md px-3 py-2 text-sm bg-white"
+      >
+        {templates.map((t) => (
+          <option value={t.id} selected={t.id === group.active_route_id}>
+            {t.label}{t.id === group.default_route_id ? ' (default)' : ''}
+          </option>
+        ))}
+      </select>
+      <input
+        id="emergency-reason"
+        placeholder="Motivo (opcional)"
+        class="border border-red-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px] bg-white"
+      />
+      <button
+        id="btn-apply-now"
+        class="cursor-pointer px-4 py-2 bg-ar-folly text-white rounded-md hover:bg-ar-folly-hover text-sm font-semibold"
+      >
+        Aplicar ahora
+      </button>
+      <button
+        id="btn-revert-default"
+        class="cursor-pointer px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm font-semibold"
+      >
+        Volver a Default
+      </button>
+    </div>
+    <p id="emergency-feedback" class="text-sm mt-2 hidden"></p>
+  </section>
+
+  <!-- Plantillas -->
+  <section class="bg-white rounded-lg shadow-sm p-4 mb-6">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="font-semibold text-ar-oxford">Plantillas</h2>
+    </div>
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-ar-oxford-disabled border-b">
+          <th class="py-2">Etiqueta</th>
+          <th class="py-2">Motivo</th>
+          <th class="py-2">Tarifa</th>
+          <th class="py-2">Estado</th>
+          <th class="py-2 text-right">Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="templates-tbody">
+        {templates.map((t) => (
+          <tr class="border-b border-gray-100 last:border-0" data-template-row={t.id}>
+            <td class="py-2 font-semibold">{t.label}</td>
+            <td class="py-2 text-ar-oxford-disabled">{t.reason ?? '\u2014'}</td>
+            <td class="py-2">{t.fare_price != null ? `$${t.fare_price}` : '\u2014'}</td>
+            <td class="py-2">
+              {t.id === group.default_route_id && (
+                <span class="text-xs font-semibold text-ar-cerulean mr-1">Default</span>
+              )}
+              {t.id === group.active_route_id && (
+                <span class="text-xs font-semibold text-green-600">Activa</span>
+              )}
+            </td>
+            <td class="py-2 text-right space-x-2 whitespace-nowrap">
+              <a href={`/admin/rutas/${group.id}/plantillas/${t.id}`} class="text-ar-cerulean hover:underline">
+                Editar
+              </a>
+              <button
+                class="text-ar-cerulean hover:underline cursor-pointer"
+                data-action="duplicate-template"
+                data-template-id={t.id}
+              >
+                Duplicar
+              </button>
+              {t.id !== group.default_route_id && (
+                <button
+                  class="text-ar-cerulean hover:underline cursor-pointer"
+                  data-action="set-default-template"
+                  data-template-id={t.id}
+                >
+                  Marcar default
+                </button>
+              )}
+              <button
+                class="text-ar-folly hover:underline cursor-pointer"
+                data-action="delete-template"
+                data-template-id={t.id}
+              >
+                Eliminar
+              </button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Programador de rutas -->
+  <section class="bg-white rounded-lg shadow-sm p-4 mb-6">
+    <h2 class="font-semibold text-ar-oxford mb-3">Programador de rutas</h2>
+
+    <form id="rule-form" class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end mb-4 bg-gray-50 p-3 rounded-md">
+      <div class="md:col-span-2">
+        <label class="block text-xs font-semibold mb-1">Plantilla a aplicar</label>
+        <select id="rule-target" class="w-full border rounded-md px-2 py-1.5 text-sm">
+          {templates.map((t) => <option value={t.id}>{t.label}</option>)}
+        </select>
+      </div>
+      <div class="md:col-span-2">
+        <label class="block text-xs font-semibold mb-1">Nombre de la regla</label>
+        <input id="rule-name" class="w-full border rounded-md px-2 py-1.5 text-sm" placeholder="Ej. Desvio feria fin de semana" />
+      </div>
+      <div>
+        <label class="block text-xs font-semibold mb-1">Hora inicio</label>
+        <input id="rule-start-time" type="time" class="w-full border rounded-md px-2 py-1.5 text-sm" required />
+      </div>
+      <div>
+        <label class="block text-xs font-semibold mb-1">Hora fin</label>
+        <input id="rule-end-time" type="time" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+      </div>
+
+      <div class="md:col-span-3">
+        <label class="block text-xs font-semibold mb-1">Dias (vacio = todos)</label>
+        <div class="flex gap-2 flex-wrap">
+          {dayLabels.map((label, idx) => (
+            <label class="flex items-center gap-1 text-xs bg-white border rounded px-2 py-1 cursor-pointer">
+              <input type="checkbox" class="rule-day-checkbox" value={idx} />
+              {label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold mb-1">Prioridad</label>
+        <input id="rule-priority" type="number" min="0" value="0" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+      </div>
+      <div class="md:col-span-2 flex gap-2">
+        <button
+          type="button"
+          id="btn-check-overlap"
+          class="cursor-pointer px-3 py-1.5 bg-gray-200 rounded-md text-sm font-semibold hover:bg-gray-300"
+        >
+          Revisar solapes
+        </button>
+        <button
+          type="submit"
+          class="cursor-pointer px-3 py-1.5 bg-ar-cerulean text-white rounded-md text-sm font-semibold hover:bg-ar-cerulean-hover"
+        >
+          Crear regla
+        </button>
+      </div>
+      <p id="rule-feedback" class="md:col-span-6 text-sm hidden"></p>
+    </form>
+
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-ar-oxford-disabled border-b">
+          <th class="py-2">Nombre</th>
+          <th class="py-2">Plantilla</th>
+          <th class="py-2">Dias</th>
+          <th class="py-2">Horario</th>
+          <th class="py-2">Prioridad</th>
+          <th class="py-2">Activa</th>
+          <th class="py-2 text-right">Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="rules-tbody">
+        {rules.map((rule) => {
+          const targetLabel = templates.find((t) => t.id === rule.target_route_id)?.label ?? '\u2014';
+          const daysText = rule.days_of_week
+            ? rule.days_of_week.map((d: number) => dayLabels[d]).join(', ')
+            : 'Todos';
+          return (
+            <tr class="border-b border-gray-100 last:border-0" data-rule-row={rule.id}>
+              <td class="py-2">{rule.name ?? '\u2014'}</td>
+              <td class="py-2">{targetLabel}</td>
+              <td class="py-2">{daysText}</td>
+              <td class="py-2">{rule.start_time}{rule.end_time ? ` - ${rule.end_time}` : ' (sin fin)'}</td>
+              <td class="py-2">{rule.priority}</td>
+              <td class="py-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(rule.is_enabled)}
+                  data-action="toggle-rule"
+                  data-rule-id={rule.id}
+                />
+              </td>
+              <td class="py-2 text-right">
+                <button
+                  class="text-ar-folly hover:underline cursor-pointer"
+                  data-action="delete-rule"
+                  data-rule-id={rule.id}
+                >
+                  Eliminar
+                </button>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Bitacora de auditoria -->
+  <section class="bg-white rounded-lg shadow-sm p-4">
+    <h2 class="font-semibold text-ar-oxford mb-3">Bitacora de activaciones</h2>
+    {logs.length === 0 ? (
+      <p class="text-ar-oxford-disabled text-sm">Sin actividad registrada todavia.</p>
+    ) : (
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-ar-oxford-disabled border-b">
+            <th class="py-2">Fecha</th>
+            <th class="py-2">Disparado por</th>
+            <th class="py-2">De</th>
+            <th class="py-2">A</th>
+            <th class="py-2">Motivo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {logs.map((log) => (
+            <tr class="border-b border-gray-100 last:border-0">
+              <td class="py-2 whitespace-nowrap">{new Date(log.occurred_at).toLocaleString('es-MX')}</td>
+              <td class="py-2">{log.triggered_by}</td>
+              <td class="py-2">{log.previous_route_label ?? '\u2014'}</td>
+              <td class="py-2 font-semibold">{log.new_route_label ?? '\u2014'}</td>
+              <td class="py-2 text-ar-oxford-disabled">{log.reason ?? '\u2014'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </section>
+</BaseLayout>
+
+<script define:vars={{ groupId }}>
+  const feedback = (el, message, ok = true) => {
+    if (!el) return;
+    el.textContent = message;
+    el.classList.remove('hidden');
+    el.classList.toggle('text-green-600', ok);
+    el.classList.toggle('text-ar-folly', !ok);
+  };
+
+  // --- Barra de emergencia ---
+  const emergencyFeedback = document.getElementById('emergency-feedback');
+
+  document.getElementById('btn-apply-now')?.addEventListener('click', async () => {
+    const routeTemplateId = document.getElementById('emergency-template-select')?.value;
+    const reason = document.getElementById('emergency-reason')?.value || undefined;
+
+    if (!confirm('Esto aplica la plantilla seleccionada de inmediato para todos los usuarios. Continuar?')) return;
+
+    const res = await fetch(`/api/route-groups/${groupId}/apply-now`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routeTemplateId, reason }),
+    });
+
+    if (res.ok) {
+      feedback(emergencyFeedback, 'Plantilla aplicada. Recargando...', true);
+      setTimeout(() => window.location.reload(), 800);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      feedback(emergencyFeedback, err.error || 'No se pudo aplicar', false);
+    }
+  });
+
+  document.getElementById('btn-revert-default')?.addEventListener('click', async () => {
+    const reason = document.getElementById('emergency-reason')?.value || undefined;
+    const res = await fetch(`/api/route-groups/${groupId}/revert-default`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+
+    if (res.ok) {
+      feedback(emergencyFeedback, 'Se revirtio a la plantilla default. Recargando...', true);
+      setTimeout(() => window.location.reload(), 800);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      feedback(emergencyFeedback, err.error || 'No se pudo revertir', false);
+    }
+  });
+
+  // --- Plantillas: delegacion de eventos ---
+  document.getElementById('templates-tbody')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const templateId = btn.dataset.templateId;
+    const action = btn.dataset.action;
+
+    if (action === 'duplicate-template') {
+      const label = prompt('Nombre de la nueva plantilla:');
+      if (!label) return;
+      const reason = prompt('Motivo (opcional):') || undefined;
+
+      const res = await fetch(`/api/route-groups/${groupId}/templates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceRouteId: templateId, label, reason }),
+      });
+      if (res.ok) window.location.reload();
+      else alert('No se pudo duplicar la plantilla');
+    }
+
+    if (action === 'set-default-template') {
+      const res = await fetch(`/api/route-groups/${groupId}/templates/${templateId}/set-default`, { method: 'PATCH' });
+      if (res.ok) window.location.reload();
+      else alert('No se pudo marcar como default');
+    }
+
+    if (action === 'delete-template') {
+      if (!confirm('Eliminar (o archivar si tiene historial) esta plantilla?')) return;
+      const res = await fetch(`/api/route-groups/${groupId}/templates/${templateId}`, { method: 'DELETE' });
+      if (res.ok) window.location.reload();
+      else alert('No se pudo eliminar la plantilla');
+    }
+  });
+
+  // --- Programador de rutas ---
+  function getSelectedDays() {
+    return Array.from(document.querySelectorAll('.rule-day-checkbox:checked')).map((cb) => Number(cb.value));
+  }
+
+  function buildRuleDraft() {
+    const days = getSelectedDays();
+    return {
+      targetRouteId: document.getElementById('rule-target')?.value,
+      name: document.getElementById('rule-name')?.value || undefined,
+      daysOfWeek: days.length > 0 ? days : null,
+      startTime: document.getElementById('rule-start-time')?.value,
+      endTime: document.getElementById('rule-end-time')?.value || null,
+      priority: Number(document.getElementById('rule-priority')?.value || 0),
+    };
+  }
+
+  const ruleFeedback = document.getElementById('rule-feedback');
+
+  document.getElementById('btn-check-overlap')?.addEventListener('click', async () => {
+    const draft = buildRuleDraft();
+    const res = await fetch(`/api/route-groups/${groupId}/schedule-rules/check-overlap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    });
+    const data = await res.json().catch(() => ({ conflicts: [] }));
+
+    if (!res.ok) {
+      feedback(ruleFeedback, data.error || 'No se pudo revisar solapes', false);
+      return;
+    }
+
+    if (data.conflicts.length === 0) {
+      feedback(ruleFeedback, 'Sin solapes con reglas existentes de la misma prioridad.', true);
+    } else {
+      const names = data.conflicts.map((c) => c.name || c.id).join(', ');
+      feedback(ruleFeedback, `Solapa con: ${names} (misma prioridad). Revisa antes de guardar.`, false);
+    }
+  });
+
+  document.getElementById('rule-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const draft = buildRuleDraft();
+
+    const res = await fetch(`/api/route-groups/${groupId}/schedule-rules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    });
+
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      feedback(ruleFeedback, err.error || 'No se pudo crear la regla', false);
+    }
+  });
+
+  document.getElementById('rules-tbody')?.addEventListener('change', async (e) => {
+    const checkbox = e.target.closest('input[data-action="toggle-rule"]');
+    if (!checkbox) return;
+    const ruleId = checkbox.dataset.ruleId;
+
+    const res = await fetch(`/api/route-groups/${groupId}/schedule-rules/${ruleId}/toggle`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isEnabled: checkbox.checked }),
+    });
+    if (!res.ok) {
+      checkbox.checked = !checkbox.checked; // revertir el check si fallo
+      alert('No se pudo actualizar la regla');
+    }
+  });
+
+  document.getElementById('rules-tbody')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action="delete-rule"]');
+    if (!btn) return;
+    if (!confirm('Eliminar esta regla del programador?')) return;
+
+    const res = await fetch(`/api/route-groups/${groupId}/schedule-rules/${btn.dataset.ruleId}`, { method: 'DELETE' });
+    if (res.ok) window.location.reload();
+    else alert('No se pudo eliminar la regla');
+  });
+</script>

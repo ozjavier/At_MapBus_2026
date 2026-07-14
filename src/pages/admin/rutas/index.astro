@@ -1,0 +1,75 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { requireRole } from '../../../lib/guards.js';
+import { listGroups } from '../../../lib/routeGroups.js';
+
+const guardResponse = requireRole(Astro, 'ADMIN');
+if (guardResponse) return guardResponse;
+
+const groups = await listGroups();
+---
+
+<BaseLayout title="Administrador de rutas">
+  <div class="flex justify-between items-center mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-ar-oxford">Administrador de rutas</h1>
+      <p class="text-ar-oxford-disabled">Grupos de ruta, plantillas y programador</p>
+    </div>
+    <a
+      href="/admin/rutas/nuevo"
+      class="px-4 py-2 bg-ar-cerulean text-white rounded-md hover:bg-ar-cerulean-hover transition-colors font-semibold"
+    >
+      + Nueva ruta
+    </a>
+  </div>
+
+  {groups.length === 0 ? (
+    <p class="text-ar-oxford-disabled">Todavia no hay rutas registradas.</p>
+  ) : (
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-ar-oxford text-white">
+          <tr>
+            <th class="text-left px-4 py-3">Numero</th>
+            <th class="text-left px-4 py-3">Nombre</th>
+            <th class="text-left px-4 py-3">Plantilla activa</th>
+            <th class="text-left px-4 py-3">Estado</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((group) => {
+            const isDetour = group.active_route_id && group.active_route_id !== group.default_route_id;
+            return (
+              <tr class="border-b border-gray-100 last:border-0">
+                <td class="px-4 py-3 font-semibold text-ar-oxford">{group.route_number}</td>
+                <td class="px-4 py-3">{group.name ?? '\u2014'}</td>
+                <td class="px-4 py-3">
+                  <span class={`px-2 py-1 rounded-full text-xs font-semibold ${isDetour ? 'bg-ar-folly/10 text-ar-folly' : 'bg-ar-cerulean-disabled text-ar-cerulean'}`}>
+                    {group.active_template_label ?? group.default_template_label ?? 'Sin plantilla'}
+                    {isDetour && ' (desvio vigente)'}
+                  </span>
+                </td>
+                <td class="px-4 py-3">
+                  {group.is_active ? (
+                    <span class="text-green-600 font-semibold">Publicada</span>
+                  ) : (
+                    <span class="text-gray-400">Inactiva</span>
+                  )}
+                  {group.is_manually_locked && (
+                    <span class="ml-2 text-ar-folly text-xs font-semibold">Bloqueada</span>
+                  )}
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <a href={`/admin/rutas/${group.id}`} class="text-ar-cerulean hover:underline font-semibold">
+                    Administrar &rarr;
+                  </a>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  )}
+</BaseLayout>

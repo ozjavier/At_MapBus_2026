@@ -1,0 +1,294 @@
+---
+import ProfileLayout from '../../layouts/ProfileLayout.astro';
+import { requireUser } from '../../lib/guards.js';
+import { getProfileById } from '../../lib/profile.js';
+
+const guardResponse = requireUser(Astro);
+if (guardResponse) return guardResponse;
+
+const profile = await getProfileById(Astro.locals.user.id);
+const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ') || '—';
+---
+
+<ProfileLayout title="Mi Cuenta" active="cuenta">
+  <div class="flex justify-between items-center mb-4">
+    <h1 class="text-2xl font-bold">Información de Cuenta</h1>
+    <button
+      id="edit-toggle"
+      type="button"
+      class="cursor-pointer text-ar-cerulean hover:text-ar-cerulean-hover font-semibold text-sm"
+    >
+      Editar
+    </button>
+  </div>
+
+  <!-- Vista de solo lectura -->
+  <div id="view-mode" class="flex flex-col gap-4 max-w-md">
+    <div>
+      <p class="text-xs font-semibold text-ar-oxford-disabled uppercase">Nombre</p>
+      <p class="text-lg" id="view-name">{fullName}</p>
+    </div>
+    <div>
+      <p class="text-xs font-semibold text-ar-oxford-disabled uppercase">Correo electrónico</p>
+      <p class="text-lg" id="view-email">{profile.email}</p>
+    </div>
+  </div>
+
+  <!-- Formulario de edición (oculto por defecto) -->
+  <form id="edit-form" class="hidden flex-col gap-4 max-w-md">
+    <div>
+      <label class="block text-sm font-semibold mb-1" for="firstName">Nombre(s)</label>
+      <input
+        id="firstName"
+        name="firstName"
+        type="text"
+        value={profile.firstName}
+        required
+        class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+      />
+    </div>
+    <div>
+      <label class="block text-sm font-semibold mb-1" for="lastName">Apellido(s)</label>
+      <input
+        id="lastName"
+        name="lastName"
+        type="text"
+        value={profile.lastName}
+        class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+      />
+    </div>
+    <div>
+      <label class="block text-sm font-semibold mb-1" for="email">Correo electrónico</label>
+      <input
+        id="email"
+        name="email"
+        type="email"
+        value={profile.email}
+        required
+        class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+      />
+    </div>
+
+    <p id="profile-error" class="text-ar-folly text-sm hidden"></p>
+    <p id="profile-success" class="text-ar-cerulean text-sm hidden"></p>
+
+    <div class="flex gap-3">
+      <button
+        type="submit"
+        class="cursor-pointer bg-ar-cerulean text-white rounded-md px-4 py-2 font-semibold hover:bg-ar-cerulean-hover transition-colors"
+      >
+        Guardar cambios
+      </button>
+      <button
+        id="cancel-edit"
+        type="button"
+        class="cursor-pointer bg-white border border-ar-cerulean-disabled rounded-md px-4 py-2 font-semibold hover:bg-ar-platinum transition-colors"
+      >
+        Cancelar
+      </button>
+    </div>
+  </form>
+
+  <hr class="my-8 border-ar-cerulean-disabled" />
+
+  <div class="flex justify-between items-center mb-4">
+    <h2 class="text-xl font-bold">Cambiar Contraseña</h2>
+    <button
+      id="password-toggle"
+      type="button"
+      class="cursor-pointer text-ar-cerulean hover:text-ar-cerulean-hover font-semibold text-sm"
+    >
+      Cambiar Contraseña
+    </button>
+  </div>
+
+  <form id="password-form" class="hidden flex-col gap-4 max-w-md">
+    <div>
+      <label class="block text-sm font-semibold mb-1" for="currentPassword">Contraseña actual</label>
+      <input
+        id="currentPassword"
+        name="currentPassword"
+        type="password"
+        required
+        class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+      />
+    </div>
+    <div>
+      <label class="block text-sm font-semibold mb-1" for="newPassword">Nueva contraseña</label>
+      <input
+        id="newPassword"
+        name="newPassword"
+        type="password"
+        minlength="8"
+        required
+        class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+      />
+      <p class="text-xs text-ar-oxford-disabled mt-1">Mínimo 8 caracteres.</p>
+    </div>
+    <div>
+      <label class="block text-sm font-semibold mb-1" for="confirmPassword">Confirmar nueva contraseña</label>
+      <input
+        id="confirmPassword"
+        name="confirmPassword"
+        type="password"
+        minlength="8"
+        required
+        class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+      />
+    </div>
+
+    <p id="password-error" class="text-ar-folly text-sm hidden"></p>
+    <p id="password-success" class="text-ar-cerulean text-sm hidden"></p>
+
+    <div class="flex gap-3">
+      <button
+        type="submit"
+        class="cursor-pointer bg-ar-cerulean text-white rounded-md px-4 py-2 font-semibold hover:bg-ar-cerulean-hover transition-colors"
+      >
+        Actualizar contraseña
+      </button>
+      <button
+        id="cancel-password"
+        type="button"
+        class="cursor-pointer bg-white border border-ar-cerulean-disabled rounded-md px-4 py-2 font-semibold hover:bg-ar-platinum transition-colors"
+      >
+        Cancelar
+      </button>
+    </div>
+  </form>
+</ProfileLayout>
+
+<script>
+  // --- Edición de nombre / correo ---
+  const viewMode = document.getElementById('view-mode');
+  const editForm = document.getElementById('edit-form') as HTMLFormElement | null;
+  const editToggle = document.getElementById('edit-toggle');
+  const cancelEdit = document.getElementById('cancel-edit');
+  const profileError = document.getElementById('profile-error');
+  const profileSuccess = document.getElementById('profile-success');
+  const viewName = document.getElementById('view-name');
+  const viewEmail = document.getElementById('view-email');
+
+  function showEditForm() {
+    viewMode?.classList.add('hidden');
+    editForm?.classList.remove('hidden');
+    editForm?.classList.add('flex');
+  }
+
+  function showViewMode() {
+    editForm?.classList.add('hidden');
+    editForm?.classList.remove('flex');
+    viewMode?.classList.remove('hidden');
+    profileError?.classList.add('hidden');
+    profileSuccess?.classList.add('hidden');
+  }
+
+  editToggle?.addEventListener('click', showEditForm);
+  cancelEdit?.addEventListener('click', showViewMode);
+
+  editForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    profileError?.classList.add('hidden');
+    profileSuccess?.classList.add('hidden');
+
+    const formData = new FormData(editForm);
+    const body = {
+      firstName: formData.get('firstName'),
+      lastName: formData.get('lastName') || '',
+      email: formData.get('email'),
+    };
+
+    const res = await fetch('/api/perfil', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      if (profileError) {
+        profileError.textContent = data.error || 'No se pudo actualizar el perfil';
+        profileError.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (viewName) {
+      viewName.textContent = [body.firstName, body.lastName].filter(Boolean).join(' ') || '—';
+    }
+    if (viewEmail) {
+      viewEmail.textContent = String(body.email);
+    }
+
+    showViewMode();
+  });
+
+  // --- Cambio de contraseña ---
+  const passwordForm = document.getElementById('password-form') as HTMLFormElement | null;
+  const passwordToggle = document.getElementById('password-toggle');
+  const cancelPassword = document.getElementById('cancel-password');
+  const passwordError = document.getElementById('password-error');
+  const passwordSuccess = document.getElementById('password-success');
+
+  function showPasswordForm() {
+    passwordForm?.classList.remove('hidden');
+    passwordForm?.classList.add('flex');
+  }
+
+  function hidePasswordForm() {
+    passwordForm?.classList.add('hidden');
+    passwordForm?.classList.remove('flex');
+    passwordForm?.reset();
+    passwordError?.classList.add('hidden');
+    passwordSuccess?.classList.add('hidden');
+  }
+
+  passwordToggle?.addEventListener('click', showPasswordForm);
+  cancelPassword?.addEventListener('click', hidePasswordForm);
+
+  passwordForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    passwordError?.classList.add('hidden');
+    passwordSuccess?.classList.add('hidden');
+
+    const formData = new FormData(passwordForm);
+    const newPassword = String(formData.get('newPassword') || '');
+    const confirmPassword = String(formData.get('confirmPassword') || '');
+
+    if (newPassword !== confirmPassword) {
+      if (passwordError) {
+        passwordError.textContent = 'Las contraseñas no coinciden';
+        passwordError.classList.remove('hidden');
+      }
+      return;
+    }
+
+    const body = {
+      currentPassword: formData.get('currentPassword'),
+      newPassword,
+    };
+
+    const res = await fetch('/api/perfil/password', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      if (passwordError) {
+        passwordError.textContent = data.error || 'No se pudo cambiar la contraseña';
+        passwordError.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (passwordSuccess) {
+      passwordSuccess.textContent = 'Contraseña actualizada exitosamente';
+      passwordSuccess.classList.remove('hidden');
+    }
+    passwordForm.reset();
+  });
+</script>

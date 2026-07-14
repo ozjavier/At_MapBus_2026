@@ -1,0 +1,569 @@
+---
+import BaseLayout from '../../../../../layouts/BaseLayout.astro';
+import { requireRole } from '../../../../../lib/guards.js';
+import { getGroupById } from '../../../../../lib/routeGroups.js';
+import { getTemplateById, getTemplateWithDetails } from '../../../../../lib/routeTemplates.js';
+import { listFareSegments } from '../../../../../lib/fareSegments.js';
+import { listFareTypes } from '../../../../../lib/fareTypes.js';
+import { listOperatingSchedules } from '../../../../../lib/operatingSchedules.js';
+
+const guardResponse = requireRole(Astro, 'ADMIN');
+if (guardResponse) return guardResponse;
+
+const groupId = Astro.params.id as string;
+const routeId = Astro.params.routeId as string;
+
+const group = await getGroupById(groupId);
+const template = await getTemplateWithDetails(routeId);
+
+if (!group || !template || template.group_id !== groupId) {
+  return new Response('Plantilla no encontrada', { status: 404 });
+}
+
+const fareSegments = await listFareSegments(routeId);
+const fareTypes = await listFareTypes();
+const schedules = await listOperatingSchedules(routeId);
+
+// Si esta plantilla no es la que esta activa ahora mismo, cargamos la
+// activa para superponerla en el mapa como referencia de solo lectura.
+const activeTemplate =
+  group.active_route_id && group.active_route_id !== routeId ? await getTemplateById(group.active_route_id) : null;
+
+const dayLabels = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+
+// Los datos iniciales para el editor de mapa se pasan via data-* en vez de
+// define:vars: define:vars fuerza is:inline en el script, y eso rompe el
+// `import` de RoutePointsEditor/leaflet (el navegador no puede resolverlo
+// sin el bundling de Vite). Con data-* el script sigue siendo un modulo
+// normal, procesado y empaquetado correctamente.
+const initialPointsJson = JSON.stringify(template.points);
+const referenceRouteJson = JSON.stringify(activeTemplate?.points ?? null);
+---
+
+<BaseLayout title={`Editar plantilla \u2014 ${template.label}`}>
+  <a href={`/admin/rutas/${groupId}`} class="text-sm text-ar-cerulean hover:underline">&larr; Volver a la ruta {group.route_number}</a>
+
+  <div class="max-w-6xl mx-auto bg-white rounded-lg shadow-sm p-6 mt-4">
+    <h1 class="text-2xl font-bold text-ar-oxford mb-1">Editar plantilla</h1>
+    <p class="text-ar-oxford-disabled mb-6">
+      Ruta {group.route_number} &mdash; los cambios aqui solo afectan a esta plantilla,
+      nunca a las demas versiones del grupo.
+    </p>
+
+    <form id="template-form" class="flex flex-col gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="md:col-span-2">
+          <label class="block text-sm font-semibold mb-1" for="label">Etiqueta</label>
+          <input
+            id="label"
+            name="label"
+            required
+            value={template.label}
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1" for="farePrice">Tarifa base</label>
+          <input
+            id="farePrice"
+            name="farePrice"
+            type="number"
+            step="0.5"
+            min="0"
+            value={template.fare_price ?? ''}
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1" for="reason">Motivo</label>
+          <input
+            id="reason"
+            name="reason"
+            value={template.reason ?? ''}
+            placeholder="Ej. Desvio por obra"
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm font-semibold mb-1" for="description">Descripcion</label>
+        <textarea
+          id="description"
+          name="description"
+          rows="2"
+          class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+        >{template.description ?? ''}</textarea>
+      </div>
+
+      <div>
+        <label class="block text-sm font-semibold mb-1">Trazado de la ruta</label>
+        <p class="text-xs text-ar-oxford-disabled mb-2">
+          Haz clic en el mapa para agregar puntos en orden. Arrastra un marcador
+          para ajustarlo, usa las flechas de la lista para reordenar, y marca
+          "Omitir parada" para los puntos que solo definen el trazado (no son
+          paradas de pasajeros). Ctrl+Z / Ctrl+Y para deshacer/rehacer.
+        </p>
+
+        <div
+          id="template-editor-root"
+          data-group-id={groupId}
+          data-route-id={routeId}
+          data-initial-points={initialPointsJson}
+          data-reference-route={referenceRouteJson}
+          class="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-4"
+        >
+          <!-- Columna del mapa -->
+          <div>
+            <div id="points-map" class="w-full h-[560px] rounded-md border border-ar-cerulean-disabled bg-gray-50"></div>
+            <p id="map-error" class="text-xs text-ar-folly mt-1 hidden">
+              No se pudo iniciar el mapa. Revisa la consola del navegador (F12).
+            </p>
+            {activeTemplate && (
+              <p class="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                <span class="inline-block w-4 border-t-2 border-dashed border-gray-500"></span>
+                Linea discontinua gris: ruta activa actualmente ("{activeTemplate.label}"), para comparar mientras editas esta plantilla.
+              </p>
+            )}
+            {!activeTemplate && group.active_route_id === routeId && (
+              <p class="text-xs text-green-600 mt-1">Esta es la plantilla activa actualmente en este grupo.</p>
+            )}
+          </div>
+
+          <!-- Columna de la lista de puntos -->
+          <div class="flex flex-col h-[560px]">
+            <div class="bg-gray-50 rounded-md p-2 mb-2 space-y-2">
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-xs font-semibold mb-1" for="manual-lat">Lat</label>
+                  <input id="manual-lat" type="number" step="any" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold mb-1" for="manual-lng">Lng</label>
+                  <input id="manual-lng" type="number" step="any" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-add-manual-point"
+                class="cursor-pointer w-full px-3 py-1.5 bg-gray-200 rounded-md text-sm font-semibold hover:bg-gray-300"
+              >
+                Agregar punto manual
+              </button>
+              <button
+                type="button"
+                id="btn-clear-points"
+                class="cursor-pointer w-full text-ar-folly text-sm font-semibold hover:underline"
+              >
+                Limpiar puntos
+              </button>
+            </div>
+
+            <div id="points-list" class="flex-1 overflow-auto border border-ar-cerulean-disabled rounded-md"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-semibold mb-1" for="scheduleStart">Inicio operacion</label>
+          <input
+            id="scheduleStart"
+            name="scheduleStart"
+            type="time"
+            value={template.schedule_start ?? ''}
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1" for="scheduleEnd">Fin operacion</label>
+          <input
+            id="scheduleEnd"
+            name="scheduleEnd"
+            type="time"
+            value={template.schedule_end ?? ''}
+            class="w-full border border-ar-cerulean-disabled rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
+          />
+        </div>
+      </div>
+
+      <p id="form-error" class="text-ar-folly text-sm hidden"></p>
+      <p id="form-success" class="text-green-600 text-sm hidden"></p>
+
+      <button
+        type="submit"
+        class="cursor-pointer bg-ar-cerulean text-white rounded-md py-2 font-semibold hover:bg-ar-cerulean-hover transition-colors"
+      >
+        Guardar cambios
+      </button>
+    </form>
+  </div>
+
+  <div class="max-w-6xl mx-auto mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <section class="bg-white rounded-lg shadow-sm p-4">
+      <h2 class="font-semibold text-ar-oxford mb-1">Tarifas por tramo y tipo de pasajero</h2>
+      <p class="text-xs text-ar-oxford-disabled mb-3">
+        Un mismo tramo de puntos puede tener un precio distinto por tipo de pasajero.
+        La "Tarifa base" de arriba se usa cuando ningun tramo aplica.
+      </p>
+
+      <form id="fare-segment-form" class="grid grid-cols-2 gap-3 items-end mb-4 bg-gray-50 p-3 rounded-md">
+        <div>
+          <label class="block text-xs font-semibold mb-1">Punto inicial</label>
+          <select id="segment-start" class="w-full border rounded-md px-2 py-1.5 text-sm">
+            {template.points.map((_: unknown, idx: number) => <option value={idx}>{idx + 1}</option>)}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold mb-1">Punto final</label>
+          <select id="segment-end" class="w-full border rounded-md px-2 py-1.5 text-sm">
+            {template.points.map((_: unknown, idx: number) => <option value={idx}>{idx + 1}</option>)}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold mb-1">Tipo de tarifa</label>
+          <select id="segment-fare-type" class="w-full border rounded-md px-2 py-1.5 text-sm">
+            {fareTypes.map((ft) => <option value={ft.id}>{ft.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold mb-1">Precio</label>
+          <input id="segment-price" type="number" step="0.5" min="0" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+        </div>
+        <button
+          type="submit"
+          class="cursor-pointer col-span-2 px-3 py-1.5 bg-ar-cerulean text-white rounded-md text-sm font-semibold hover:bg-ar-cerulean-hover"
+        >
+          Agregar
+        </button>
+        <p id="segment-feedback" class="col-span-2 text-sm hidden"></p>
+      </form>
+
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-ar-oxford-disabled border-b">
+            <th class="py-2">Tramo</th>
+            <th class="py-2">Tipo</th>
+            <th class="py-2">Precio</th>
+            <th class="py-2 text-right">Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="segments-tbody">
+          {fareSegments.map((seg) => (
+            <tr class="border-b border-gray-100 last:border-0" data-segment-row={seg.id}>
+              <td class="py-2">{seg.start_point_index + 1} &rarr; {seg.end_point_index + 1}</td>
+              <td class="py-2">{seg.fare_type_label}</td>
+              <td class="py-2">${seg.fare_price}</td>
+              <td class="py-2 text-right">
+                <button
+                  class="text-ar-folly hover:underline cursor-pointer"
+                  data-action="delete-segment"
+                  data-segment-id={seg.id}
+                >
+                  Eliminar
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="bg-white rounded-lg shadow-sm p-4">
+      <h2 class="font-semibold text-ar-oxford mb-1">Horarios de operacion</h2>
+      <p class="text-xs text-ar-oxford-disabled mb-3">
+        Puedes dividir un mismo dia en varios bloques con distinta frecuencia
+        (ej. 6:00-9:00 cada 10 min, y 9:00-16:00 cada 20 min).
+      </p>
+
+      <form id="schedule-form" class="grid grid-cols-2 gap-3 items-end mb-4 bg-gray-50 p-3 rounded-md">
+        <div>
+          <label class="block text-xs font-semibold mb-1">Tipo</label>
+          <select id="schedule-type" class="w-full border rounded-md px-2 py-1.5 text-sm">
+            <option value="WEEKDAY">Dia de la semana</option>
+            <option value="SPECIFIC_DATE">Fecha especifica</option>
+          </select>
+        </div>
+        <div id="schedule-day-wrapper">
+          <label class="block text-xs font-semibold mb-1">Dia</label>
+          <select id="schedule-day" class="w-full border rounded-md px-2 py-1.5 text-sm">
+            {dayLabels.map((label, idx) => <option value={idx}>{label}</option>)}
+          </select>
+        </div>
+        <div id="schedule-date-wrapper" class="hidden">
+          <label class="block text-xs font-semibold mb-1">Fecha</label>
+          <input id="schedule-date" type="date" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold mb-1">Etiqueta (opcional)</label>
+          <input id="schedule-label" placeholder="Ej. Hora pico" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold mb-1">Inicio</label>
+          <input id="schedule-start-time" type="time" class="w-full border rounded-md px-2 py-1.5 text-sm" required />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold mb-1">Fin</label>
+          <input id="schedule-end-time" type="time" class="w-full border rounded-md px-2 py-1.5 text-sm" required />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold mb-1">Frecuencia (min)</label>
+          <input id="schedule-frequency" type="number" min="1" value="15" class="w-full border rounded-md px-2 py-1.5 text-sm" />
+        </div>
+        <button
+          type="submit"
+          class="cursor-pointer px-3 py-1.5 bg-ar-cerulean text-white rounded-md text-sm font-semibold hover:bg-ar-cerulean-hover"
+        >
+          Agregar bloque
+        </button>
+        <p id="schedule-feedback" class="col-span-2 text-sm hidden"></p>
+      </form>
+
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-ar-oxford-disabled border-b">
+            <th class="py-2">Cuando</th>
+            <th class="py-2">Etiqueta</th>
+            <th class="py-2">Horario</th>
+            <th class="py-2">Frecuencia</th>
+            <th class="py-2 text-right">Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="schedules-tbody">
+          {schedules.map((sch) => {
+            const whenText =
+              sch.schedule_type === 'WEEKDAY'
+                ? dayLabels[sch.day_of_week]
+                : new Date(sch.specific_date).toLocaleDateString('es-MX');
+            return (
+              <tr class="border-b border-gray-100 last:border-0" data-schedule-row={sch.id}>
+                <td class="py-2">{whenText}</td>
+                <td class="py-2">{sch.label ?? '\u2014'}</td>
+                <td class="py-2">{sch.start_time} - {sch.end_time}</td>
+                <td class="py-2">Cada {sch.frequency} min</td>
+                <td class="py-2 text-right">
+                  <button
+                    class="text-ar-folly hover:underline cursor-pointer"
+                    data-action="delete-schedule"
+                    data-schedule-id={sch.id}
+                  >
+                    Eliminar
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  </div>
+</BaseLayout>
+
+<script>
+  // Script normal (SIN define:vars) para que Astro/Vite lo empaquete de
+  // verdad: asi el import de RoutePointsEditor (y el de leaflet dentro de
+  // ese modulo) se resuelve en build time, en vez de que el navegador
+  // intente resolverlo nativamente y falle.
+  import { RoutePointsEditor } from '../../../../../lib/client/routePointsEditor.js';
+
+  const root = document.getElementById('template-editor-root');
+  const groupId = root?.dataset.groupId;
+  const routeId = root?.dataset.routeId;
+  const initialPoints = JSON.parse(root?.dataset.initialPoints || '[]');
+  const referenceRoutePoints = JSON.parse(root?.dataset.referenceRoute || 'null');
+
+  const form = document.getElementById('template-form');
+  const errorEl = document.getElementById('form-error');
+  const successEl = document.getElementById('form-success');
+  const mapErrorEl = document.getElementById('map-error');
+
+  let pointsEditor;
+  try {
+    pointsEditor = new RoutePointsEditor({
+      mapContainer: document.getElementById('points-map'),
+      listContainer: document.getElementById('points-list'),
+      initialPoints,
+      referenceRoute: referenceRoutePoints,
+    });
+  } catch (err) {
+    console.error('[RoutePointsEditor] No se pudo inicializar el mapa:', err);
+    mapErrorEl?.classList.remove('hidden');
+  }
+
+  document.getElementById('btn-add-manual-point')?.addEventListener('click', () => {
+    const lat = Number(document.getElementById('manual-lat')?.value);
+    const lng = Number(document.getElementById('manual-lng')?.value);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      if (errorEl) {
+        errorEl.textContent = 'Lat/Lng manual invalidos';
+        errorEl.classList.remove('hidden');
+      }
+      return;
+    }
+    pointsEditor?.addPoint({ lat, lng, skipStop: false });
+  });
+
+  document.getElementById('btn-clear-points')?.addEventListener('click', () => {
+    pointsEditor?.clearAll();
+  });
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl?.classList.add('hidden');
+    successEl?.classList.add('hidden');
+
+    const points = pointsEditor?.getPoints() ?? [];
+    if (points.length < 2) {
+      if (errorEl) {
+        errorEl.textContent = 'Traza al menos 2 puntos en el mapa';
+        errorEl.classList.remove('hidden');
+      }
+      return;
+    }
+
+    const data = new FormData(form);
+
+    const res = await fetch(`/api/route-groups/${groupId}/templates/${routeId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label: data.get('label'),
+        reason: data.get('reason') || undefined,
+        description: data.get('description') || undefined,
+        points,
+        farePrice: data.get('farePrice') ? Number(data.get('farePrice')) : null,
+        scheduleStart: data.get('scheduleStart') || null,
+        scheduleEnd: data.get('scheduleEnd') || null,
+      }),
+    });
+
+    if (res.ok) {
+      if (successEl) {
+        successEl.textContent = 'Cambios guardados.';
+        successEl.classList.remove('hidden');
+      }
+    } else {
+      const err = await res.json().catch(() => ({}));
+      if (errorEl) {
+        errorEl.textContent = err.error || 'No se pudo guardar';
+        errorEl.classList.remove('hidden');
+      }
+    }
+  });
+</script>
+
+<script define:vars={{ groupId, routeId }}>
+  // Este script SI puede usar define:vars con seguridad porque no tiene
+  // ningun `import`: solo usa fetch/DOM, que el navegador ejecuta nativo
+  // sin necesitar el bundling de Vite.
+  function feedback(el, message, ok = true) {
+    if (!el) return;
+    el.textContent = message;
+    el.classList.remove('hidden');
+    el.classList.toggle('text-green-600', ok);
+    el.classList.toggle('text-ar-folly', !ok);
+  }
+
+  // --- Tarifas por tramo y tipo de pasajero ---
+  const segmentFeedback = document.getElementById('segment-feedback');
+
+  document.getElementById('fare-segment-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const startPointIndex = Number(document.getElementById('segment-start')?.value);
+    const endPointIndex = Number(document.getElementById('segment-end')?.value);
+    const fareTypeId = document.getElementById('segment-fare-type')?.value;
+    const farePrice = Number(document.getElementById('segment-price')?.value);
+
+    if (endPointIndex <= startPointIndex) {
+      feedback(segmentFeedback, 'El punto final debe ser mayor al inicial', false);
+      return;
+    }
+    if (Number.isNaN(farePrice) || farePrice < 0) {
+      feedback(segmentFeedback, 'Precio invalido', false);
+      return;
+    }
+
+    const res = await fetch(`/api/route-groups/${groupId}/templates/${routeId}/fare-segments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startPointIndex, endPointIndex, fareTypeId, farePrice }),
+    });
+
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      feedback(segmentFeedback, err.error || 'No se pudo agregar el tramo', false);
+    }
+  });
+
+  document.getElementById('segments-tbody')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action="delete-segment"]');
+    if (!btn) return;
+    if (!confirm('Eliminar este tramo de tarifa?')) return;
+
+    const res = await fetch(`/api/route-groups/${groupId}/templates/${routeId}/fare-segments/${btn.dataset.segmentId}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) window.location.reload();
+    else alert('No se pudo eliminar el tramo');
+  });
+
+  // --- Horarios de operacion (varios bloques por dia) ---
+  const scheduleFeedback = document.getElementById('schedule-feedback');
+  const scheduleTypeSelect = document.getElementById('schedule-type');
+  const dayWrapper = document.getElementById('schedule-day-wrapper');
+  const dateWrapper = document.getElementById('schedule-date-wrapper');
+
+  scheduleTypeSelect?.addEventListener('change', () => {
+    const isWeekday = scheduleTypeSelect.value === 'WEEKDAY';
+    dayWrapper?.classList.toggle('hidden', !isWeekday);
+    dateWrapper?.classList.toggle('hidden', isWeekday);
+  });
+
+  document.getElementById('schedule-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const scheduleType = scheduleTypeSelect?.value;
+    const payload = {
+      scheduleType,
+      label: document.getElementById('schedule-label')?.value || undefined,
+      dayOfWeek: scheduleType === 'WEEKDAY' ? Number(document.getElementById('schedule-day')?.value) : null,
+      specificDate: scheduleType === 'SPECIFIC_DATE' ? document.getElementById('schedule-date')?.value : null,
+      startTime: document.getElementById('schedule-start-time')?.value,
+      endTime: document.getElementById('schedule-end-time')?.value,
+      frequency: Number(document.getElementById('schedule-frequency')?.value),
+    };
+
+    if (payload.endTime <= payload.startTime) {
+      feedback(scheduleFeedback, 'La hora de fin debe ser posterior a la de inicio', false);
+      return;
+    }
+
+    const res = await fetch(`/api/route-groups/${groupId}/templates/${routeId}/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      feedback(scheduleFeedback, err.error || 'No se pudo agregar el bloque', false);
+    }
+  });
+
+  document.getElementById('schedules-tbody')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action="delete-schedule"]');
+    if (!btn) return;
+    if (!confirm('Eliminar este bloque de horario?')) return;
+
+    const res = await fetch(`/api/route-groups/${groupId}/templates/${routeId}/schedules/${btn.dataset.scheduleId}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) window.location.reload();
+    else alert('No se pudo eliminar el bloque');
+  });
+</script>
