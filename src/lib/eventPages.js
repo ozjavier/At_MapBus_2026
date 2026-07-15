@@ -73,6 +73,7 @@ export async function createEventPage({
   latitude,
   longitude,
   contentHtml,
+  contentJson,
   coverImageUrl,
   eventDate,
   metaTitle,
@@ -84,8 +85,8 @@ export async function createEventPage({
 
   await pool.query(
     `INSERT INTO event_pages
-       (id, title, slug, place_name, address, latitude, longitude, content_html, cover_image_url, event_date, meta_title, meta_description, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, title, slug, place_name, address, latitude, longitude, content_html, content_json, cover_image_url, event_date, meta_title, meta_description, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       title,
@@ -95,6 +96,7 @@ export async function createEventPage({
       latitude ?? null,
       longitude ?? null,
       contentHtml,
+      JSON.stringify(contentJson ?? null),
       coverImageUrl ?? null,
       eventDate ?? null,
       metaTitle ?? null,
@@ -116,6 +118,7 @@ export async function updateEventPage(
     latitude,
     longitude,
     contentHtml,
+    contentJson,
     coverImageUrl,
     eventDate,
     metaTitle,
@@ -134,7 +137,7 @@ export async function updateEventPage(
   await pool.query(
     `UPDATE event_pages SET
        title = ?, slug = ?, place_name = ?, address = ?, latitude = ?, longitude = ?,
-       content_html = ?, cover_image_url = ?, event_date = ?, meta_title = ?, meta_description = ?, status = ?
+       content_html = ?, content_json = ?, cover_image_url = ?, event_date = ?, meta_title = ?, meta_description = ?, status = ?
      WHERE id = ?`,
     [
       title ?? current.title,
@@ -144,6 +147,9 @@ export async function updateEventPage(
       latitude ?? null,
       longitude ?? null,
       contentHtml ?? current.content_html,
+      contentJson !== undefined
+        ? JSON.stringify(contentJson)
+        : current.content_json,
       coverImageUrl ?? null,
       eventDate ?? null,
       metaTitle ?? null,

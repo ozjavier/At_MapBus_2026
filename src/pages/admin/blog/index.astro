@@ -1,60 +1,57 @@
 ---
 import BaseLayout from '../../../layouts/BaseLayout.astro';
-import { listArticles, countArticles } from '../../../lib/articles.js';
+import { requireRole } from '../../../lib/guards.js';
+import { listArticles } from '../../../lib/articles.js';
 
-const PAGE_SIZE = 9;
-const page = Math.max(1, Number(Astro.url.searchParams.get('page') || 1));
+const guardResponse = requireRole(Astro, 'ADMIN');
+if (guardResponse) return guardResponse;
 
-const [articles, total] = await Promise.all([
-  listArticles({ status: 'PUBLISHED', limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
-  countArticles({ status: 'PUBLISHED' }),
-]);
-
-const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-const canonicalPath = page > 1 ? `/blog?page=${page}` : '/blog';
+const articles = await listArticles({ limit: 50 });
 ---
 
-<BaseLayout
-  title="Blog"
-  description="Guías, novedades y consejos sobre las rutas de transporte público en Atlixco."
-  canonicalPath={canonicalPath}
->
-  <h1 class="text-3xl font-bold text-ar-oxford mb-1">Blog de Atlixbus</h1>
-  <p class="text-ar-oxford-disabled mb-8">Guías y novedades sobre nuestras rutas</p>
+<BaseLayout title="Blog">
+  <div class="flex justify-between items-center mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-ar-oxford">Blog</h1>
+      <p class="text-ar-oxford-disabled">Articulos para SEO y contenido de rutas</p>
+    </div>
+    <a href="/admin/blog/nuevo" class="px-4 py-2 bg-ar-cerulean text-white rounded-md hover:bg-ar-cerulean-hover font-semibold">
+      + Nuevo articulo
+    </a>
+  </div>
 
   {articles.length === 0 ? (
-    <p class="text-ar-oxford-disabled">Todavia no hay articulos publicados.</p>
+    <p class="text-ar-oxford-disabled">Todavia no hay articulos.</p>
   ) : (
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      {articles.map((a) => (
-        <a href={`/blog/${a.slug}`} class="block bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-          {a.cover_image_url && (
-            <img src={a.cover_image_url} alt={a.title} class="w-full h-40 object-cover" loading="lazy" />
-          )}
-          <div class="p-4">
-            <h2 class="font-semibold text-ar-oxford mb-1">{a.title}</h2>
-            {a.excerpt && <p class="text-sm text-ar-oxford-disabled line-clamp-3">{a.excerpt}</p>}
-            {a.published_at && (
-              <p class="text-xs text-ar-oxford-disabled mt-2">
-                {new Date(a.published_at).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
-              </p>
-            )}
-          </div>
-        </a>
-      ))}
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-ar-oxford text-white">
+          <tr>
+            <th class="text-left px-4 py-3">Titulo</th>
+            <th class="text-left px-4 py-3">Estado</th>
+            <th class="text-left px-4 py-3">Publicado</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {articles.map((a) => (
+            <tr class="border-b border-gray-100 last:border-0">
+              <td class="px-4 py-3 font-semibold text-ar-oxford">{a.title}</td>
+              <td class="px-4 py-3">
+                <span class={`px-2 py-1 rounded-full text-xs font-semibold ${a.status === 'PUBLISHED' ? 'bg-ar-cerulean-disabled text-ar-cerulean' : 'bg-gray-100 text-gray-500'}`}>
+                  {a.status === 'PUBLISHED' ? 'Publicado' : 'Borrador'}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-ar-oxford-disabled">
+                {a.published_at ? new Date(a.published_at).toLocaleDateString('es-MX') : '—'}
+              </td>
+              <td class="px-4 py-3 text-right">
+                <a href={`/admin/blog/${a.id}`} class="text-ar-cerulean hover:underline">Editar</a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
-  )}
-
-  {totalPages > 1 && (
-    <nav class="flex justify-center gap-2 mt-10">
-      {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-        
-        <a  href={`/blog?page=${p}`}
-          class={`px-3 py-1.5 rounded-md text-sm font-semibold ${p === page ? 'bg-ar-cerulean text-white' : 'bg-white text-ar-oxford hover:bg-ar-cerulean-disabled'}`}
-        >
-          {p}
-        </a>
-      ))}
-    </nav>
   )}
 </BaseLayout>

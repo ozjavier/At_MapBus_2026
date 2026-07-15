@@ -118,6 +118,7 @@ export async function createArticle({
   slug: requestedSlug,
   excerpt,
   contentHtml,
+  contentJson,
   coverImageUrl,
   tags,
   metaTitle,
@@ -132,14 +133,15 @@ export async function createArticle({
 
   await pool.query(
     `INSERT INTO articles
-       (id, title, slug, excerpt, content_html, cover_image_url, tags, meta_title, meta_description, status, published_at, author_user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, title, slug, excerpt, content_html, content_json, cover_image_url, tags, meta_title, meta_description, status, published_at, author_user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       title,
       slug,
       excerpt ?? null,
       contentHtml,
+      JSON.stringify(contentJson ?? null),
       coverImageUrl ?? null,
       tags ?? null,
       metaTitle ?? null,
@@ -162,6 +164,7 @@ export async function updateArticle(
     slug: requestedSlug,
     excerpt,
     contentHtml,
+    contentJson,
     coverImageUrl,
     tags,
     metaTitle,
@@ -187,7 +190,7 @@ export async function updateArticle(
 
   await pool.query(
     `UPDATE articles SET
-       title = ?, slug = ?, excerpt = ?, content_html = ?, cover_image_url = ?,
+       title = ?, slug = ?, excerpt = ?, content_html = ?, content_json = ?, cover_image_url = ?,
        tags = ?, meta_title = ?, meta_description = ?, status = ?, published_at = ?
      WHERE id = ?`,
     [
@@ -195,6 +198,9 @@ export async function updateArticle(
       slug,
       excerpt ?? null,
       contentHtml ?? current.content_html,
+      contentJson !== undefined
+        ? JSON.stringify(contentJson)
+        : current.content_json,
       coverImageUrl ?? null,
       tags ?? null,
       metaTitle ?? null,

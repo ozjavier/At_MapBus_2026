@@ -19,7 +19,7 @@ const relatedRoutes = isNew ? [] : await getArticleRoutes(id);
 const relatedRouteIds = new Set(relatedRoutes.map((r) => r.id));
 const allRouteGroups = await listGroups();
 
-const initialContentJson = JSON.stringify(article?.content_html ?? '');
+const initialBlocksJson = JSON.stringify(article?.content_json ?? { blocks: [] });
 ---
 
 <BaseLayout title={isNew ? 'Nuevo articulo' : `Editar — ${article.title}`}>
@@ -76,7 +76,7 @@ const initialContentJson = JSON.stringify(article?.content_html ?? '');
 
       <div>
         <label class="block text-sm font-semibold mb-1">Contenido</label>
-        <div id="editor-root"></div>
+        <div id="editor-root" class="border border-ar-cerulean-disabled rounded-md p-4 min-h-[400px]"></div>
       </div>
 
       <div>
@@ -132,17 +132,17 @@ const initialContentJson = JSON.stringify(article?.content_html ?? '');
   window.__ARTICLE_CONTEXT__ = { isNew, articleId };
 </script>
 
-<script data-initial={initialContentJson} id="editor-data"></script>
+<script data-initial={initialBlocksJson} id="editor-data"></script>
 
 <script>
   import ArticleEditor from '../../../components/admin/ArticleEditor.js';
 
   const { isNew, articleId } = window.__ARTICLE_CONTEXT__;
-  const initialContentHtml = JSON.parse(document.getElementById('editor-data').dataset.initial || '""');
+  const initialData = JSON.parse(document.getElementById('editor-data').dataset.initial || '{"blocks":[]}');
 
   const editorRoot = document.getElementById('editor-root');
   const editor = new ArticleEditor(editorRoot, {
-    initialContentHtml,
+    initialData,
     onImageUpload: async (file) => {
       const fd = new FormData();
       fd.append('file', file);
@@ -152,6 +152,8 @@ const initialContentJson = JSON.stringify(article?.content_html ?? '');
       return data.url;
     },
   });
+
+  await editor.ready();
 
   const form = document.getElementById('article-form');
   const feedbackEl = document.getElementById('form-feedback');
@@ -168,11 +170,15 @@ const initialContentJson = JSON.stringify(article?.content_html ?? '');
     const data = new FormData(form);
     const routeGroupIds = data.getAll('routeGroupIds');
 
+    const blocksOutput = await editor.save();
+    const contentHtml = editor.toHTML(blocksOutput);
+
     const payload = {
       title: data.get('title'),
       slug: data.get('slug') || undefined,
       excerpt: data.get('excerpt') || undefined,
-      contentHtml: editor.getHTML(),
+      contentHtml,
+      contentJson: blocksOutput,
       coverImageUrl: data.get('coverImageUrl') || undefined,
       tags: data.get('tags') || undefined,
       metaTitle: data.get('metaTitle') || undefined,

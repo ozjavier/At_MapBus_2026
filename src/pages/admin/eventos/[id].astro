@@ -20,7 +20,7 @@ const usedRouteIds = new Set(eventRoutes.map((r) => r.route_group_id));
 const allRouteGroups = await listGroups();
 const availableRouteGroups = allRouteGroups.filter((rg) => !usedRouteIds.has(rg.id));
 
-const initialContentJson = JSON.stringify(event?.content_html ?? '');
+const initialBlocksJson = JSON.stringify(event?.content_json ?? { blocks: [] });
 ---
 
 <BaseLayout title={isNew ? 'Nuevo evento' : `Editar — ${event.title}`}>
@@ -84,7 +84,7 @@ const initialContentJson = JSON.stringify(event?.content_html ?? '');
 
       <div>
         <label class="block text-sm font-semibold mb-1">Descripcion del evento</label>
-        <div id="editor-root"></div>
+        <div id="editor-root" class="border border-ar-cerulean-disabled rounded-md p-4 min-h-[300px]"></div>
       </div>
 
       <details class="border border-gray-200 rounded-md p-3">
@@ -160,17 +160,16 @@ const initialContentJson = JSON.stringify(event?.content_html ?? '');
   window.__EVENT_CONTEXT__ = { isNew, eventId };
 </script>
 
-<script data-initial={initialContentJson} id="editor-data"></script>
+<script data-initial={initialBlocksJson} id="editor-data"></script>
 
 <script>
   import ArticleEditor from '../../../components/admin/ArticleEditor.js';
 
-  const { isNew, eventId } = window.__EVENT_CONTEXT__;
-  const initialContentHtml = JSON.parse(document.getElementById('editor-data').dataset.initial || '""');
+  const { isNew, eventId } = window.__EVENT_CONTEXT__;  
 
   const editorRoot = document.getElementById('editor-root');
   const editor = new ArticleEditor(editorRoot, {
-    initialContentHtml,
+    initialData: JSON.parse(document.getElementById('editor-data').dataset.initial || '{"blocks":[]}'),
     onImageUpload: async (file) => {
       const fd = new FormData();
       fd.append('file', file);
@@ -180,6 +179,8 @@ const initialContentJson = JSON.stringify(event?.content_html ?? '');
       return data.url;
     },
   });
+
+  await editor.ready();
 
   // --- Formulario principal (datos del evento) ---
   const form = document.getElementById('event-form');
@@ -195,6 +196,10 @@ const initialContentJson = JSON.stringify(event?.content_html ?? '');
     feedbackEl.classList.add('hidden');
 
     const data = new FormData(form);
+
+    const blocksOutput = await editor.save();
+    const contentHtml = editor.toHTML(blocksOutput);
+
     const payload = {
       title: data.get('title'),
       slug: data.get('slug') || undefined,
@@ -202,7 +207,8 @@ const initialContentJson = JSON.stringify(event?.content_html ?? '');
       address: data.get('address') || undefined,
       latitude: data.get('latitude') ? Number(data.get('latitude')) : null,
       longitude: data.get('longitude') ? Number(data.get('longitude')) : null,
-      contentHtml: editor.getHTML(),
+      contentHtml,
+      contentJson: blocksOutput,
       coverImageUrl: data.get('coverImageUrl') || undefined,
       eventDate: data.get('eventDate') || undefined,
       metaTitle: data.get('metaTitle') || undefined,

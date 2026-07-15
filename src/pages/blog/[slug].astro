@@ -1,0 +1,84 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getArticleBySlug, getArticleRoutes } from '../../lib/articles.js';
+import { SITE_URL } from '../../lib/site.js';
+
+const slug = Astro.params.slug as string;
+const article = await getArticleBySlug(slug);
+
+if (!article) {
+  return new Response('Articulo no encontrado', { status: 404 });
+}
+
+const relatedRoutes = await getArticleRoutes(article.id);
+
+const canonicalPath = `/blog/${article.slug}`;
+const description = article.meta_description || article.excerpt || undefined;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: article.title,
+  description: description ?? undefined,
+  image: article.cover_image_url ? new URL(article.cover_image_url, SITE_URL).toString() : undefined,
+  datePublished: article.published_at,
+  dateModified: article.updated_at,
+  mainEntityOfPage: new URL(canonicalPath, SITE_URL).toString(),
+  publisher: { '@type': 'Organization', name: 'Atlixbus' },
+};
+
+const breadcrumbLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: 'Inicio', item: SITE_URL },
+    { '@type': 'ListItem', position: 2, name: 'Blog', item: new URL('/blog', SITE_URL).toString() },
+    { '@type': 'ListItem', position: 3, name: article.title, item: new URL(canonicalPath, SITE_URL).toString() },
+  ],
+};
+---
+
+<BaseLayout
+  title={article.meta_title || article.title}
+  description={description}
+  image={article.cover_image_url}
+  canonicalPath={canonicalPath}
+>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} slot="head" />
+  <script type="application/ld+json" set:html={JSON.stringify(breadcrumbLd)} slot="head" />
+
+  <nav class="text-sm text-ar-oxford-disabled mb-4">
+    <a href="/blog" class="hover:underline">Blog</a> / {article.title}
+  </nav>
+
+  <article class="max-w-3xl mx-auto">
+    <h1 class="text-3xl font-bold text-ar-oxford mb-2">{article.title}</h1>
+    {article.published_at && (
+      <p class="text-sm text-ar-oxford-disabled mb-6">
+        Publicado el {new Date(article.published_at).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
+      </p>
+    )}
+
+    {article.cover_image_url && (
+      <img src={article.cover_image_url} alt={article.title} class="w-full rounded-lg mb-6" />
+    )}
+
+    <div
+      class="prose max-w-none prose-headings:text-ar-oxford prose-a:text-ar-cerulean"
+      set:html={article.content_html}
+    />
+
+    {relatedRoutes.length > 0 && (
+      <div class="mt-10 pt-6 border-t border-gray-200">
+        <h2 class="font-semibold text-ar-oxford mb-3">Rutas relacionadas</h2>
+        <div class="flex flex-wrap gap-2">
+          {relatedRoutes.map((r) => (
+            <span class="px-3 py-1.5 bg-ar-cerulean-disabled text-ar-cerulean rounded-full text-sm font-semibold">
+              Ruta {r.route_number} {r.name ? `— ${r.name}` : ''}
+            </span>
+          ))}
+        </div>
+      </div>
+    )}
+  </article>
+</BaseLayout>

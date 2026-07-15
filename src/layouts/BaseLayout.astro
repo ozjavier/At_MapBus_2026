@@ -4,9 +4,11 @@ import '../styles/global.css';
 interface Props {
   title: string;
   description?: string;
-  image?: string;         // ruta relativa, ej. article.cover_image_url
-  canonicalPath?: string; // ej. '/blog/mi-articulo'
+  image?: string;
+  canonicalPath?: string;
   noindex?: boolean;
+  fullBleed?: boolean;
+  hideFooter?: boolean;
 }
 
 const {
@@ -15,6 +17,8 @@ const {
   image,
   canonicalPath,
   noindex = false,
+  fullBleed = false,
+  hideFooter = false,
 } = Astro.props;
 
 const user = Astro.locals.user ?? null;
@@ -76,12 +80,14 @@ const ogImage = image ? new URL(image, SITE_URL).toString() : undefined;
       </div>
     </header>
 
-    <main class="flex-1 container mx-auto px-4 py-8">
+    <main class={fullBleed ? 'flex-1' : 'flex-1 container mx-auto px-4 py-8'}>
       <slot />
     </main>
 
-    <footer class="text-center text-sm text-ar-oxford-disabled py-6">
-      &copy; {new Date().getFullYear()} Atlixbus
-    </footer>
+    {!hideFooter && (
+      <footer class="text-center text-sm text-ar-oxford-disabled py-6">
+        &copy; {new Date().getFullYear()} Atlixbus
+      </footer>
+    )}
   </body>
 </html>

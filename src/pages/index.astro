@@ -1,12 +1,297 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { listActiveRoutesForFinder } from '../lib/publicRoutes.js';
+
+const routes = await listActiveRoutesForFinder();
+const routesJson = JSON.stringify(routes);
 ---
 
-<BaseLayout title="Inicio">
-  <h1 class="text-3xl font-bold mb-2">Bienvenido a Atlixbus</h1>
-  <p class="text-ar-oxford-disabled">
-    Proyecto base con Astro + Tailwind 4.1. Si ves esta página con los
-    colores de marca aplicados (fondo claro, header azul marino), la
-    configuración de Tailwind quedó correcta.
-  </p>
+<BaseLayout
+  title="Encontrar mi ruta"
+  description="Encuentra la ruta de camión más rápida entre dos puntos de Atlixco."
+  fullBleed
+  hideFooter
+>
+  <div class="relative flex flex-col lg:flex-row lg:h-[calc(100vh-4rem)]">
+    <!-- Panel de búsqueda -->
+    <aside
+      id="finder-panel"
+      class="order-2 lg:order-1 relative z-10 flex flex-col bg-white lg:w-[400px] lg:h-full lg:overflow-y-auto lg:shadow-xl lg:border-r lg:border-gray-100"
+    >
+      <div class="p-5 sm:p-6 space-y-5">
+        <div>
+          <h1 class="text-xl sm:text-2xl font-bold text-ar-oxford">¿A dónde vamos?</h1>
+          <p class="text-sm text-ar-oxford-disabled mt-1">
+            Escribe tu origen y destino, o marca los puntos directamente en el mapa.
+          </p>
+        </div>
+
+        <div id="route-finder-root" data-routes={routesJson} class="space-y-4">
+          <!-- Origen / destino agrupados -->
+          <div class="relative space-y-2">
+            <div
+              class="hidden lg:block absolute left-[11px] top-[26px] bottom-[38px] w-px bg-gray-200"
+              aria-hidden="true"
+            ></div>
+
+            <!-- Origen -->
+            <div class="flex items-center gap-2">
+              <span class="shrink-0 w-5 h-5 rounded-full bg-ar-cerulean text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white shadow-sm">A</span>
+              <div class="flex-1 relative">
+                <input
+                  id="start-input"
+                  type="text"
+                  placeholder="Origen — Ej: C. 5 de Mayo 45"
+                  autocomplete="off"
+                  aria-label="Punto de partida"
+                  class="w-full pl-3 pr-[4.5rem] py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ar-cerulean focus:border-transparent"
+                />
+                <div class="absolute inset-y-0 right-1 flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    id="locate-btn"
+                    title="Usar mi ubicación actual"
+                    class="cursor-pointer p-1.5 rounded-md text-ar-cerulean hover:bg-ar-cerulean-disabled transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="3"></circle>
+                      <path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    id="start-pick-btn"
+                    title="Seleccionar en el mapa"
+                    class="cursor-pointer p-1.5 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+                      <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                  </button>
+                </div>
+                <div
+                  id="start-suggestions"
+                  class="hidden absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-auto"
+                ></div>
+              </div>
+            </div>
+
+            <!-- Intercambiar -->
+            <div class="flex justify-start">
+              <button
+                type="button"
+                id="swap-btn"
+                title="Intercambiar origen y destino"
+                aria-label="Intercambiar origen y destino"
+                class="cursor-pointer w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 hover:rotate-180 transition-all duration-300 text-ar-oxford z-4"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17 3v12M17 3l4 4M17 3l-4 4"></path>
+                  <path d="M7 21V9M7 21l-4-4M7 21l4-4"></path>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Destino -->
+            <div class="flex items-center gap-2">
+              <span class="shrink-0 w-5 h-5 rounded-full bg-ar-folly text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white shadow-sm">B</span>
+              <div class="flex-1 relative">
+                <input
+                  id="end-input"
+                  type="text"
+                  placeholder="Destino — Ej: Zócalo de Atlixco"
+                  autocomplete="off"
+                  aria-label="Destino"
+                  class="w-full pl-3 pr-11 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ar-cerulean focus:border-transparent"
+                />
+                <div class="absolute inset-y-0 right-1 flex items-center">
+                  <button
+                    type="button"
+                    id="end-pick-btn"
+                    title="Seleccionar en el mapa"
+                    class="cursor-pointer p-1.5 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+                      <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                  </button>
+                </div>
+                <div
+                  id="end-suggestions"
+                  class="hidden absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-auto"
+                ></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Destinos frecuentes -->
+          <div class="flex flex-wrap gap-1.5" id="quick-chips">
+            <button type="button" data-fill-end="Zócalo de Atlixco"
+              class="cursor-pointer px-3 py-1.5 rounded-full border border-ar-cerulean-disabled text-xs font-medium text-ar-cerulean hover:bg-ar-cerulean-disabled transition-colors">
+              Zócalo de Atlixco
+            </button>
+            <button type="button" data-fill-end="Central de Autobuses, Atlixco"
+              class="cursor-pointer px-3 py-1.5 rounded-full border border-ar-cerulean-disabled text-xs font-medium text-ar-cerulean hover:bg-ar-cerulean-disabled transition-colors">
+              Central de autobuses
+            </button>
+            <button type="button" data-fill-end="Hospital General de Atlixco"
+              class="cursor-pointer px-3 py-1.5 rounded-full border border-ar-cerulean-disabled text-xs font-medium text-ar-cerulean hover:bg-ar-cerulean-disabled transition-colors">
+              Hospital General
+            </button>
+          </div>
+
+          <!-- Estado / errores -->
+          <p id="finder-status" class="hidden text-sm rounded-md px-3 py-2 bg-ar-folly-disabled text-ar-folly" aria-live="polite"></p>
+
+          <!-- Acciones -->
+          <div class="space-y-2 pt-1">
+            <button
+              type="button"
+              id="search-btn"
+              disabled
+              class="cursor-pointer disabled:cursor-auto w-full flex items-center justify-center gap-2 px-4 py-3 bg-ar-cerulean text-white rounded-lg hover:bg-ar-cerulean-hover disabled:bg-ar-cerulean-disabled disabled:text-gray-500 transition-colors font-semibold shadow-sm"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="7"></circle>
+                <path d="m21 21-4.3-4.3"></path>
+              </svg>
+              Buscar rutas
+            </button>
+            <button
+              type="button"
+              id="clear-btn"
+              class="cursor-pointer w-full px-4 py-2 text-ar-oxford-disabled hover:text-ar-oxford text-sm font-medium transition-colors"
+            >
+              Limpiar búsqueda
+            </button>
+          </div>
+
+          <details class="text-xs text-ar-cerulean pt-1">
+            <summary class="cursor-pointer select-none font-medium">¿Cómo funciona?</summary>
+            <ol class="list-decimal list-inside mt-2 space-y-1 text-ar-oxford-disabled">
+              <li>Escribe una dirección o tócala directamente en el mapa.</li>
+              <li>Usa el botón de ubicación para partir desde donde estás.</li>
+              <li>Elige la ruta recomendada y sigue las indicaciones en el mapa.</li>
+            </ol>
+          </details>
+
+          <!-- Resultados -->
+          <div class="pt-2">
+            <div id="results-empty" class="text-center py-8 px-4 text-ar-oxford-disabled">
+              <svg class="mx-auto mb-2 text-gray-300" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="3" y="6" width="18" height="12" rx="2"></rect>
+                <circle cx="7.5" cy="18" r="1.5" fill="currentColor"></circle>
+                <circle cx="16.5" cy="18" r="1.5" fill="currentColor"></circle>
+                <path d="M3 11h18"></path>
+              </svg>
+              <p class="text-sm">Ingresa un origen y un destino para ver las rutas disponibles.</p>
+            </div>
+            <div id="route-results" class="space-y-3" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Mapa -->
+    <div class="order-1 lg:order-2 relative flex-1 lg:h-full">
+      <div id="finder-map" class="w-full h-[42vh] lg:h-full bg-gray-100"></div>
+
+      <p
+        id="map-error"
+        class="hidden absolute top-3 left-3 right-3 text-xs text-ar-folly bg-white px-3 py-2 rounded-md shadow"
+      >
+        No se pudo iniciar el mapa. Revisa la consola del navegador (F12).
+      </p>
+
+      <div class="absolute bottom-3 left-3 bg-white/95 backdrop-blur px-3 py-2 rounded-lg shadow text-xs text-gray-600 space-y-1.5 z-[9999]">
+        <div class="flex items-center gap-4">
+          <span class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full bg-ar-cerulean text-white text-[9px] font-bold flex items-center justify-center">A</span>
+            Origen
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full bg-ar-folly text-white text-[9px] font-bold flex items-center justify-center">B</span>
+            Destino
+          </span>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full bg-ar-cerulean flex items-center justify-center">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M6 15l6-6 6 6"></path></svg>
+            </span>
+            Sube aquí
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full bg-ar-folly flex items-center justify-center">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M6 9l6 6 6-6"></path></svg>
+            </span>
+            Baja aquí
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
 </BaseLayout>
+
+<script>
+  import { RouteFinderApp } from '../lib/client/routeFinder.js';
+
+  const root = document.getElementById('route-finder-root');
+  const routes = JSON.parse(root.dataset.routes ?? '[]');
+
+  const startInput = document.getElementById('start-input');
+  const endInput = document.getElementById('end-input');
+  const resultsContainer = document.getElementById('route-results');
+  const emptyState = document.getElementById('results-empty');
+
+  const app = new RouteFinderApp({
+    mapContainer: document.getElementById('finder-map'),
+    routes,
+    startInput,
+    endInput,
+    startSuggestions: document.getElementById('start-suggestions'),
+    endSuggestions: document.getElementById('end-suggestions'),
+    startPickBtn: document.getElementById('start-pick-btn'),
+    endPickBtn: document.getElementById('end-pick-btn'),
+    searchBtn: document.getElementById('search-btn'),
+    clearBtn: document.getElementById('clear-btn'),
+    locateBtn: document.getElementById('locate-btn'),
+    resultsContainer,
+    statusContainer: document.getElementById('finder-status'),
+    mapErrorContainer: document.getElementById('map-error'),
+  });
+
+  window.__routeFinderApp = app;
+
+  // Alterna el estado vacío del panel de resultados según lo que renderice la app.
+  const toggleEmptyState = () => {
+    emptyState.classList.toggle('hidden', resultsContainer.children.length > 0);
+  };
+  new MutationObserver(toggleEmptyState).observe(resultsContainer, { childList: true });
+
+  // Intercambiar origen y destino.
+  document.getElementById('swap-btn')?.addEventListener('click', () => {
+    const prevStart = app.start;
+    const prevEnd = app.end;
+    app.start = prevEnd;
+    app.end = prevStart;
+    if (startInput) startInput.value = app.start?.label ?? '';
+    if (endInput) endInput.value = app.end?.label ?? '';
+    app.renderMarkers?.();
+    app.updateSearchButtonState?.();
+    if (app.map && app.start) app.map.panTo([app.start.lat, app.start.lng]);
+    if (app.start && app.end) app.findRoutes?.();
+  });
+
+  // Chips de destinos frecuentes: rellenan el destino y disparan el autocompletado existente.
+  document.querySelectorAll('#quick-chips [data-fill-end]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      if (!endInput) return;
+      endInput.value = chip.dataset.fillEnd;
+      endInput.dispatchEvent(new Event('input', { bubbles: true }));
+      endInput.focus();
+    });
+  });
+</script>

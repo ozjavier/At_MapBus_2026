@@ -1,158 +1,133 @@
-import { Editor } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
-import Image from "@tiptap/extension-image";
-import Link from "@tiptap/extension-link";
-import Placeholder from "@tiptap/extension-placeholder";
+import EditorJS from "@editorjs/editorjs";
+import Header from "@editorjs/header";
+import ListTool from "@editorjs/list";
+import Quote from "@editorjs/quote";
+import Delimiter from "@editorjs/delimiter";
+import ImageTool from "@editorjs/image";
 
-const BUTTONS = [
-  { cmd: "toggleBold", label: "B", title: "Negrita", active: "bold" },
-  { cmd: "toggleItalic", label: "I", title: "Cursiva", active: "italic" },
-  {
-    cmd: "toggleHeading2",
-    label: "H2",
-    title: "Subtitulo",
-    active: "heading2",
-  },
-  {
-    cmd: "toggleBulletList",
-    label: "• Lista",
-    title: "Lista",
-    active: "bulletList",
-  },
-  {
-    cmd: "toggleOrderedList",
-    label: "1. Lista",
-    title: "Lista numerada",
-    active: "orderedList",
-  },
-  {
-    cmd: "toggleBlockquote",
-    label: '" Cita',
-    title: "Cita",
-    active: "blockquote",
-  },
-];
+// Convierte un bloque de Editor.js a HTML. Nuestro propio conversor, sin
+// depender de una libreria externa que se puede romper con cada cambio de
+// version de los tools (ya paso con @editorjs/list).
+function blockToHtml(block) {
+  const { type, data } = block;
+
+  switch (type) {
+    case "header": {
+      const level = data.level || 2;
+      return `<h${level}>${data.text ?? ""}</h${level}>`;
+    }
+
+    case "paragraph":
+      return `<p>${data.text ?? ""}</p>`;
+
+    case "list": {
+      const tag = data.style === "ordered" ? "ol" : "ul";
+      const items = (data.items || [])
+        .map(
+          (item) =>
+            `<li>${typeof item === "string" ? item : (item.content ?? "")}</li>`,
+        )
+        .join("");
+      return `<${tag}>${items}</${tag}>`;
+    }
+
+    case "quote": {
+      const caption = data.caption ? `${data.caption}` : "";
+      return `<blockquote><p>${data.text ?? ""}</p>${caption}</blockquote>`;
+    }
+
+    case "delimiter":
+      return "<hr />";
+
+    case "image": {
+      const url = data.file?.url ?? "";
+      const caption = data.caption
+        ? `<figcaption>${data.caption}</figcaption>`
+        : "";
+      return `<figure><img src="${url}" alt="${data.caption ?? ""}" />${caption}</figure>`;
+    }
+
+    default:
+      return "";
+  }
+}
 
 export default class ArticleEditor {
   constructor(
     container,
     {
-      initialContentHtml = "",
-      placeholder = "Escribe el articulo...",
+      initialData = null,
+      placeholder = "Escribe el contenido...",
       onImageUpload,
     } = {},
   ) {
-    this.container = container;
-    this.onImageUpload = onImageUpload;
-
-    this.toolbarEl = document.createElement("div");
-    this.toolbarEl.className =
-      "flex flex-wrap gap-1 border border-b-0 border-ar-cerulean-disabled rounded-t-md bg-gray-50 p-2";
-    this.contentEl = document.createElement("div");
-    this.contentEl.className =
-      "article-editor-content border border-ar-cerulean-disabled rounded-b-md p-4 min-h-[400px] focus:outline-none";
-
-    container.appendChild(this.toolbarEl);
-    container.appendChild(this.contentEl);
-
-    this.editor = new Editor({
-      element: this.contentEl,
-      extensions: [
-        StarterKit,
-        Link.configure({ openOnClick: false }),
-        Image,
-        Placeholder.configure({ placeholder }),
-      ],
-      content: initialContentHtml,
-      onTransaction: () => this.renderToolbarState(),
-    });
-
-    this.renderToolbar();
-    this.renderToolbarState();
-  }
-
-  renderToolbar() {
-    this.toolbarEl.innerHTML = "";
-
-    BUTTONS.forEach(({ cmd, label, title }) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = label;
-      btn.title = title;
-      btn.dataset.cmd = cmd;
-      btn.className = "px-2 py-1 text-sm rounded hover:bg-ar-cerulean-disabled";
-      btn.addEventListener("click", () => {
-        this.editor.chain().focus()[cmd]().run();
-      });
-      this.toolbarEl.appendChild(btn);
-    });
-
-    const linkBtn = this.makeButton("🔗 Link", () => {
-      const url = window.prompt("URL del enlace:");
-      if (url) this.editor.chain().focus().setLink({ href: url }).run();
-    });
-    this.toolbarEl.appendChild(linkBtn);
-
-    const imgBtn = this.makeButton("🖼 Imagen", async () => {
-      if (!this.onImageUpload) return;
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = "image/*";
-      input.onchange = async () => {
-        const file = input.files?.[0];
-        if (!file) return;
-        const url = await this.onImageUpload(file);
-        if (url) this.editor.chain().focus().setImage({ src: url }).run();
-      };
-      input.click();
-    });
-    this.toolbarEl.appendChild(imgBtn);
-
-    const undoBtn = this.makeButton("↺", () =>
-      this.editor.chain().focus().undo().run(),
-    );
-    const redoBtn = this.makeButton("↻", () =>
-      this.editor.chain().focus().redo().run(),
-    );
-    this.toolbarEl.appendChild(undoBtn);
-    this.toolbarEl.appendChild(redoBtn);
-  }
-
-  makeButton(label, onClick) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = label;
-    btn.className = "px-2 py-1 text-sm rounded hover:bg-ar-cerulean-disabled";
-    btn.addEventListener("click", onClick);
-    return btn;
-  }
-
-  renderToolbarState() {
-    // Resalta el boton activo (negrita/italica/etc en el cursor actual)
-    [...this.toolbarEl.querySelectorAll("button[data-cmd]")].forEach((btn) => {
-      const map = {
-        toggleBold: "bold",
-        toggleItalic: "italic",
-        toggleBulletList: "bulletList",
-        toggleOrderedList: "orderedList",
-        toggleBlockquote: "blockquote",
-      };
-      const mark = map[btn.dataset.cmd];
-      const isActive = mark ? this.editor.isActive(mark) : false;
-      btn.classList.toggle("bg-ar-cerulean-disabled", isActive);
-      btn.classList.toggle("text-ar-cerulean", isActive);
+    this.editor = new EditorJS({
+      holder: container,
+      placeholder,
+      data:
+        initialData && initialData.blocks?.length
+          ? initialData
+          : { blocks: [] },
+      tools: {
+        header: {
+          class: Header,
+          inlineToolbar: true,
+          config: {
+            levels: [2, 3, 4],
+            defaultLevel: 2,
+            placeholder: "Subtitulo",
+          },
+        },
+        list: { class: ListTool, inlineToolbar: true },
+        quote: {
+          class: Quote,
+          inlineToolbar: true,
+          config: {
+            quotePlaceholder: "Cita",
+            captionPlaceholder: "Autor (opcional)",
+          },
+        },
+        delimiter: Delimiter,
+        image: {
+          class: ImageTool,
+          config: {
+            uploader: {
+              async uploadByFile(file) {
+                if (!onImageUpload) return { success: 0 };
+                const url = await onImageUpload(file);
+                return url ? { success: 1, file: { url } } : { success: 0 };
+              },
+              async uploadByUrl(url) {
+                return { success: 1, file: { url } };
+              },
+            },
+          },
+        },
+      },
     });
   }
 
-  getHTML() {
-    return this.editor.getHTML();
+  async ready() {
+    await this.editor.isReady;
   }
 
-  isEmpty() {
-    return this.editor.isEmpty;
+  // Bloques crudos — esto se guarda en content_json para poder re-editar despues
+  async save() {
+    return this.editor.save(); // { time, blocks, version }
+  }
+
+  // Convierte bloques ya guardados a HTML — esto se guarda en content_html
+  // para que las paginas publicas (que no cambiaron) sigan funcionando igual.
+  toHTML(blocksOutput) {
+    if (!blocksOutput?.blocks?.length) return "";
+    return blocksOutput.blocks.map(blockToHtml).join("");
+  }
+
+  isEmpty(blocksOutput) {
+    return !blocksOutput?.blocks?.length;
   }
 
   destroy() {
-    this.editor.destroy();
+    return this.editor.destroy?.();
   }
 }

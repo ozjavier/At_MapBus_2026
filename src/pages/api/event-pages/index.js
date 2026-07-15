@@ -13,9 +13,10 @@ const createEventPageSchema = z.object({
   address: z.string().optional(),
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),
-  contentHtml: z.string().min(1),
+  contentHtml: z.string(),
+  contentJson: z.any().optional(),
   coverImageUrl: z.string().url().optional().or(z.literal("")),
-  eventDate: z.string().optional(), // 'YYYY-MM-DD'
+  eventDate: z.string().optional(),
   metaTitle: z.string().max(255).optional(),
   metaDescription: z.string().max(500).optional(),
   status: z.enum(["DRAFT", "PUBLISHED"]).optional(),
