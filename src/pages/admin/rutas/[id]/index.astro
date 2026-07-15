@@ -2,7 +2,7 @@
 import BaseLayout from '../../../../layouts/BaseLayout.astro';
 import { requireRole } from '../../../../lib/guards.js';
 import { getGroupById, getActivationLog } from '../../../../lib/routeGroups.js';
-import { listTemplates } from '../../../../lib/routeTemplates.js';
+import { listTemplates, getTemplateWithDetails } from '../../../../lib/routeTemplates.js';
 import { listRules } from '../../../../lib/scheduleRules.js';
 
 const guardResponse = requireRole(Astro, 'ADMIN');
@@ -20,6 +20,13 @@ const rules = await listRules(groupId);
 const logs = await getActivationLog(groupId, { limit: 20 });
 
 const dayLabels = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+
+// Plantilla activa, para previsualizar su trazado en un mapa de solo lectura
+const activeTemplate = group.active_route_id
+  ? await getTemplateWithDetails(group.active_route_id)
+  : null;
+const activeRoutePointsJson = JSON.stringify(activeTemplate?.points ?? []);
+const activeIsLoop = String(activeTemplate?.is_loop ?? false);
 ---
 
 <BaseLayout title={`Ruta ${group.route_number}`}>
@@ -39,6 +46,25 @@ const dayLabels = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
       )}
     </div>
   </div>
+
+  <!-- Previsualizacion de la ruta activa -->
+  <section class="bg-white rounded-lg shadow-sm p-4 mb-6">
+    <h2 class="font-semibold text-ar-oxford mb-1">Previsualizacion de la ruta activa</h2>
+    <p class="text-xs text-ar-oxford-disabled mb-3">
+      {activeTemplate
+        ? `Mostrando el trazado de "${activeTemplate.label}".`
+        : 'Este grupo aun no tiene una plantilla activa.'}
+    </p>
+    <div
+      id="active-route-map"
+      data-points={activeRoutePointsJson}
+      data-is-loop={activeIsLoop}
+      class="w-full h-[360px] rounded-md border border-ar-cerulean-disabled bg-gray-50"
+    ></div>
+    <p id="active-map-error" class="text-xs text-ar-folly mt-1 hidden">
+      No se pudo iniciar el mapa. Revisa la consola del navegador (F12).
+    </p>
+  </section>
 
   <!-- Barra de emergencia -->
   <section class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6" data-group-id={group.id}>
@@ -275,6 +301,61 @@ const dayLabels = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
     )}
   </section>
 </BaseLayout>
+
+<script>
+  // Script normal (SIN define:vars) para que Astro/Vite lo empaquete bien y
+  // el import de leaflet se resuelva en build time, igual que en
+  // plantillas/[routeId].astro.
+  import L from 'leaflet';
+  import 'leaflet/dist/leaflet.css';
+
+  const ATLIXCO_CENTER = [18.9099148, -98.4368282];
+
+  const mapEl = document.getElementById('active-route-map');
+  const mapErrorEl = document.getElementById('active-map-error');
+
+  if (mapEl) {
+    try {
+      const points = JSON.parse(mapEl.dataset.points || '[]');
+      const isLoop = mapEl.dataset.isLoop === 'true';
+
+      const center = points[0] ? [points[0].lat, points[0].lng] : ATLIXCO_CENTER;
+      const map = L.map(mapEl).setView(center, 15);
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      }).addTo(map);
+
+      if (points.length > 0) {
+        const routePoints = isLoop ? [...points, points[0]] : points;
+        const latlngs = routePoints.map((p) => [p.lat, p.lng]);
+
+        L.polyline(latlngs, { color: '#007991', weight: 4, opacity: 0.9 }).addTo(map);
+
+        points.forEach((p, i) => {
+          const bg = p.skipStop ? '#9CA3AF' : '#007991';
+          const icon = L.divIcon({
+            className: 'route-point-marker',
+            html: `<div style="background:${bg};color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4);">${i + 1}</div>`,
+            iconSize: [22, 22],
+            iconAnchor: [11, 11],
+          });
+          L.marker([p.lat, p.lng], { icon }).addTo(map);
+        });
+
+        map.fitBounds(latlngs, { padding: [30, 30] });
+      } else {
+        mapErrorEl?.classList.add('hidden');
+      }
+
+      requestAnimationFrame(() => map.invalidateSize());
+      setTimeout(() => map.invalidateSize(), 250);
+    } catch (err) {
+      console.error('[active-route-map] No se pudo iniciar el mapa:', err);
+      mapErrorEl?.classList.remove('hidden');
+    }
+  }
+</script>
 
 <script define:vars={{ groupId }}>
   const feedback = (el, message, ok = true) => {

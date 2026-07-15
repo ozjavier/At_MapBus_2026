@@ -110,15 +110,16 @@ const referenceRouteJson = JSON.stringify(activeTemplate?.points ?? null);
           Ruta en bucle (conecta el último punto con el primero)
         </label>
 
+
         <div
-          id="template-editor-root"
-            data-group-id={groupId}
-            data-route-id={routeId}
-            data-initial-points={initialPointsJson}
-            data-reference-route={referenceRouteJson}
-          + data-is-loop={String(template.is_loop ?? false)}
-          class="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-4"
-        >
+  id="template-editor-root"
+    data-group-id={groupId}
+    data-route-id={routeId}
+    data-initial-points={initialPointsJson}
+    data-reference-route={referenceRouteJson}
+    data-is-loop={template.is_loop ? 'true' : 'false'}
+  class="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-4"
+>
           <!-- Columna del mapa -->
           <div>
             <div id="points-map" class="w-full h-[560px] rounded-md border border-ar-cerulean-disabled bg-gray-50"></div>

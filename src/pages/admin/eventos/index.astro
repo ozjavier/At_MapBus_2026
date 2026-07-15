@@ -1,0 +1,59 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { requireRole } from '../../../lib/guards.js';
+import { listEventPages } from '../../../lib/eventPages.js';
+
+const guardResponse = requireRole(Astro, 'ADMIN');
+if (guardResponse) return guardResponse;
+
+const events = await listEventPages();
+---
+
+<BaseLayout title="Eventos">
+  <div class="flex justify-between items-center mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-ar-oxford">Paginas de evento</h1>
+      <p class="text-ar-oxford-disabled">Campañas con directorio de rutas para llegar al lugar</p>
+    </div>
+    <a href="/admin/eventos/nuevo" class="px-4 py-2 bg-ar-cerulean text-white rounded-md hover:bg-ar-cerulean-hover font-semibold">
+      + Nuevo evento
+    </a>
+  </div>
+
+  {events.length === 0 ? (
+    <p class="text-ar-oxford-disabled">Todavia no hay paginas de evento.</p>
+  ) : (
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-ar-oxford text-white">
+          <tr>
+            <th class="text-left px-4 py-3">Titulo</th>
+            <th class="text-left px-4 py-3">Lugar</th>
+            <th class="text-left px-4 py-3">Fecha</th>
+            <th class="text-left px-4 py-3">Estado</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {events.map((e) => (
+            <tr class="border-b border-gray-100 last:border-0">
+              <td class="px-4 py-3 font-semibold text-ar-oxford">{e.title}</td>
+              <td class="px-4 py-3 text-ar-oxford-disabled">{e.place_name ?? '—'}</td>
+              <td class="px-4 py-3 text-ar-oxford-disabled">
+                {e.event_date ? new Date(e.event_date).toLocaleDateString('es-MX') : '—'}
+              </td>
+              <td class="px-4 py-3">
+                <span class={`px-2 py-1 rounded-full text-xs font-semibold ${e.status === 'PUBLISHED' ? 'bg-ar-cerulean-disabled text-ar-cerulean' : 'bg-gray-100 text-gray-500'}`}>
+                  {e.status === 'PUBLISHED' ? 'Publicado' : 'Borrador'}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <a href={`/admin/eventos/${e.id}`} class="text-ar-cerulean hover:underline">Editar</a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</BaseLayout>

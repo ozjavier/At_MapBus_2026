@@ -1,0 +1,82 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getEventPageBySlug, listEventPageRoutes } from '../../lib/eventPages.js';
+
+const slug = Astro.params.slug as string;
+const event = await getEventPageBySlug(slug);
+
+if (!event) {
+  return new Response('Pagina no encontrada', { status: 404 });
+}
+
+const routes = await listEventPageRoutes(event.id);
+
+const SITE_URL = import.meta.env.SITE_URL || 'https://atlixbus.mx';
+const canonicalPath = `/eventos/${event.slug}`;
+const description = event.meta_description || undefined;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Event',
+  name: event.title,
+  startDate: event.event_date ?? undefined,
+  location: event.place_name
+    ? {
+        '@type': 'Place',
+        name: event.place_name,
+        address: event.address ?? undefined,
+        geo: event.latitude && event.longitude
+          ? { '@type': 'GeoCoordinates', latitude: event.latitude, longitude: event.longitude }
+          : undefined,
+      }
+    : undefined,
+  image: event.cover_image_url ? new URL(event.cover_image_url, SITE_URL).toString() : undefined,
+  description,
+};
+---
+
+<BaseLayout
+  title={event.meta_title || event.title}
+  description={description}
+  image={event.cover_image_url}
+  canonicalPath={canonicalPath}
+>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} slot="head" />
+
+  <div class="max-w-3xl mx-auto">
+    <h1 class="text-3xl font-bold text-ar-oxford mb-1">{event.title}</h1>
+    {event.place_name && <p class="text-ar-oxford-disabled mb-1">{event.place_name}</p>}
+    {event.event_date && (
+      <p class="text-sm text-ar-oxford-disabled mb-6">
+        {new Date(event.event_date).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
+      </p>
+    )}
+
+    {event.cover_image_url && (
+      <img src={event.cover_image_url} alt={event.title} class="w-full rounded-lg mb-6" />
+    )}
+
+    <div class="prose max-w-none prose-headings:text-ar-oxford" set:html={event.content_html} />
+
+    {routes.length > 0 && (
+      <div class="mt-10 pt-6 border-t border-gray-200">
+        <h2 class="text-xl font-bold text-ar-oxford mb-4">Cómo llegar</h2>
+        <div class="flex flex-col gap-3">
+          {routes.map((r) => (
+            <div class="bg-white rounded-lg shadow-sm p-4 flex gap-4">
+              <span class="shrink-0 w-10 h-10 rounded-full bg-ar-cerulean text-white flex items-center justify-center font-bold text-sm">
+                {r.route_number}
+              </span>
+              <div>
+                <p class="font-semibold text-ar-oxford">Ruta {r.route_number} {r.name ? `— ${r.name}` : ''}</p>
+                {r.custom_instructions && (
+                  <p class="text-sm text-ar-oxford-disabled mt-1">{r.custom_instructions}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+</BaseLayout>

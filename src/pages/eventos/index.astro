@@ -1,0 +1,27 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { listEventPages } from '../../lib/eventPages.js';
+
+const events = await listEventPages({ status: 'PUBLISHED' });
+---
+
+<BaseLayout title="Eventos" description="Eventos y cómo llegar en transporte público en Atlixco." canonicalPath="/eventos">
+  <h1 class="text-3xl font-bold text-ar-oxford mb-8">Eventos</h1>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    {events.map((e) => (
+      <a href={`/eventos/${e.slug}`} class="block bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+        {e.cover_image_url && <img src={e.cover_image_url} alt={e.title} class="w-full h-40 object-cover" loading="lazy" />}
+        <div class="p-4">
+          <h2 class="font-semibold text-ar-oxford mb-1">{e.title}</h2>
+          {e.place_name && <p class="text-sm text-ar-oxford-disabled">{e.place_name}</p>}
+          {e.event_date && (
+            <p class="text-xs text-ar-oxford-disabled mt-2">
+              {new Date(e.event_date).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
+            </p>
+          )}
+        </div>
+      </a>
+    ))}
+  </div>
+</BaseLayout>

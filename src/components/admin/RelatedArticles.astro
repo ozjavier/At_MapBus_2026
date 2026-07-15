@@ -1,0 +1,26 @@
+---
+import { getArticlesForRoute } from '../lib/articles.js';
+
+interface Props {
+  routeGroupId: string;
+}
+
+const { routeGroupId } = Astro.props;
+const articles = await getArticlesForRoute(routeGroupId, { limit: 5 });
+---
+
+{articles.length > 0 && (
+  <div class="bg-white rounded-lg shadow-sm p-4">
+    <h2 class="font-semibold text-ar-oxford mb-3">Artículos sobre esta ruta</h2>
+    <ul class="flex flex-col gap-3">
+      {articles.map((a) => (
+        <li>
+          <a href={`/blog/${a.slug}`} class="text-ar-cerulean hover:underline text-sm font-semibold">
+            {a.title}
+          </a>
+          {a.excerpt && <p class="text-xs text-ar-oxford-disabled mt-0.5">{a.excerpt}</p>}
+        </li>
+      ))}
+    </ul>
+  </div>
+)}

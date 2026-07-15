@@ -3,14 +3,25 @@ import '../styles/global.css';
 
 interface Props {
   title: string;
+  description?: string;
+  image?: string;         // ruta relativa, ej. article.cover_image_url
+  canonicalPath?: string; // ej. '/blog/mi-articulo'
+  noindex?: boolean;
 }
 
-const { title } = Astro.props;
+const {
+  title,
+  description = 'Consulta rutas, horarios y tarifas de transporte publico en Atlixco.',
+  image,
+  canonicalPath,
+  noindex = false,
+} = Astro.props;
 
-// A partir del Paso 3, un middleware llenará Astro.locals.user
-// (id, email, role, name) leyendo la cookie de sesión. Por ahora
-// queda en null para no romper el layout mientras se construye.
 const user = Astro.locals.user ?? null;
+
+import { SITE_NAME, SITE_URL } from '../lib/site.js';
+const canonicalUrl = canonicalPath ? new URL(canonicalPath, SITE_URL).toString() : undefined;
+const ogImage = image ? new URL(image, SITE_URL).toString() : undefined;
 ---
 
 <!doctype html>
@@ -18,7 +29,24 @@ const user = Astro.locals.user ?? null;
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{title} · Atlixbus</title>
+    <title>{title} · {SITE_NAME}</title>
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex,nofollow" />}
+    {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    {canonicalUrl && <meta property="og:url" content={canonicalUrl} />}
+    {ogImage && <meta property="og:image" content={ogImage} />}
+
+    <meta name="twitter:card" content={ogImage ? 'summary_large_image' : 'summary'} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    {ogImage && <meta name="twitter:image" content={ogImage} />}
+
+    <slot name="head" />
   </head>
   <body class="min-h-screen flex flex-col">
     <header class="bg-ar-oxford text-white">
@@ -26,30 +54,21 @@ const user = Astro.locals.user ?? null;
         <a href="/" class="font-bold text-lg">Atlixbus</a>
 
         <nav class="flex items-center gap-6 text-sm font-semibold">
-          <a href="/">Inicio</a>
+          <a href="/admin/rutas">Rutas</a>
+          <a href="/blog">Blog</a>
+          <a href="/eventos">Eventos</a>
 
-          {user && (
-            <a href="/perfil">Perfil</a>
-          )}
-
-          {user?.role === 'ADMIN' && (
-            <a href="/admin">Administración</a>
-          )}
+          {user && <a href="/perfil">Perfil</a>}
+          {user?.role === 'ADMIN' && <a href="/admin">Administración</a>}
 
           {user ? (
             <form method="POST" action="/api/auth/logout">
-              <button
-                type="submit"
-                class="cursor-pointer px-3 py-1 bg-ar-folly rounded-md hover:bg-ar-folly-hover"
-              >
+              <button type="submit" class="cursor-pointer px-3 py-1 bg-ar-folly rounded-md hover:bg-ar-folly-hover">
                 Cerrar sesión
               </button>
             </form>
           ) : (
-            <a
-              href="/login"
-              class="px-3 py-1 bg-ar-saffron text-ar-oxford rounded-md hover:bg-ar-cerulean hover:text-white transition-colors"
-            >
+            <a href="/login" class="px-3 py-1 bg-ar-saffron text-ar-oxford rounded-md hover:bg-ar-cerulean hover:text-white transition-colors">
               Iniciar sesión
             </a>
           )}
