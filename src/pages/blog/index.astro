@@ -1,60 +1,400 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { listArticles, countArticles } from '../../lib/articles.js';
+import {
+  listArticles,
+  countArticles,
+  getAllTags,
+  getFeaturedArticles,
+} from '../../lib/articles.js';
+import { SITE_URL, SITE_NAME } from '../../lib/site.js';
 
 const PAGE_SIZE = 9;
-const page = Math.max(1, Number(Astro.url.searchParams.get('page') || 1));
 
-const [articles, total] = await Promise.all([
-  listArticles({ status: 'PUBLISHED', limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+const url = Astro.url;
+const page = Math.max(1, Number(url.searchParams.get('page') || 1));
+const q = (url.searchParams.get('q') || '').trim();
+const tag = (url.searchParams.get('tag') || '').trim();
+const sort = url.searchParams.get('sort') || 'recent';
+
+const hasActiveFilters = Boolean(q || tag || sort !== 'recent' || page > 1);
+
+const [articles, total, siteTotal, allTags, featured] = await Promise.all([
+  listArticles({
+    status: 'PUBLISHED',
+    search: q || undefined,
+    tag: tag || undefined,
+    sort,
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  }),
+  countArticles({ status: 'PUBLISHED', search: q || undefined, tag: tag || undefined }),
   countArticles({ status: 'PUBLISHED' }),
+  getAllTags({ status: 'PUBLISHED' }),
+  hasActiveFilters ? Promise.resolve([]) : getFeaturedArticles({ limit: 3 }),
 ]);
 
 const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-const canonicalPath = page > 1 ? `/blog?page=${page}` : '/blog';
+
+// "Sigue explorando": recomendaciones que no se repiten con lo ya mostrado
+const shownIds = new Set([...featured.map((a) => a.id), ...articles.map((a) => a.id)]);
+const sidebarRecent = await getFeaturedArticles({ limit: 5, excludeIds: Array.from(shownIds) });
+
+function buildUrl({ page: p, q: qq, tag: t, sort: s } = {}) {
+  const params = new URLSearchParams();
+  const nq = qq !== undefined ? qq : q;
+  const nt = t !== undefined ? t : tag;
+  const ns = s !== undefined ? s : sort;
+  const np = p !== undefined ? p : page;
+
+  if (nq) params.set('q', nq);
+  if (nt) params.set('tag', nt);
+  if (ns && ns !== 'recent') params.set('sort', ns);
+  if (np && np > 1) params.set('page', String(np));
+
+  const qs = params.toString();
+  return qs ? `/blog?${qs}` : '/blog';
+}
+
+const canonicalPath = buildUrl();
+
+const sortOptions = [
+  { value: 'recent', label: 'Más recientes' },
+  { value: 'oldest', label: 'Más antiguos' },
+  { value: 'title_asc', label: 'Título A–Z' },
+  { value: 'title_desc', label: 'Título Z–A' },
+];
+
+function formatDate(d) {
+  return new Date(d).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+// Paginación compacta con elipsis: 1 ... 4 5 [6] 7 8 ... 20
+function getPageNumbers(current, total) {
+  const range = new Set([1, total, current]);
+  for (let i = current - 1; i <= current + 1; i++) {
+    if (i >= 1 && i <= total) range.add(i);
+  }
+  const sorted = Array.from(range).sort((a, b) => a - b);
+  const pages = [];
+  let prev = 0;
+  for (const p of sorted) {
+    if (p - prev > 1) pages.push('...');
+    pages.push(p);
+    prev = p;
+  }
+  return pages;
+}
+const pageNumbers = getPageNumbers(page, totalPages);
+
+// SEO: las páginas de búsqueda por texto no deben indexarse (contenido variable/duplicado);
+// las de categoría (tag) sí, porque son archivos temáticos evergreen.
+const seoNoindex = Boolean(q);
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Blog',
+  name: `Blog de ${SITE_NAME}`,
+  url: new URL('/blog', SITE_URL).toString(),
+  blogPost: articles.map((a) => ({
+    '@type': 'BlogPosting',
+    headline: a.title,
+    url: new URL(`/blog/${a.slug}`, SITE_URL).toString(),
+    datePublished: a.published_at,
+    ...(a.cover_image_url ? { image: new URL(a.cover_image_url, SITE_URL).toString() } : {}),
+  })),
+};
+
+const breadcrumbLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: 'Inicio', item: SITE_URL },
+    { '@type': 'ListItem', position: 2, name: 'Blog', item: new URL('/blog', SITE_URL).toString() },
+  ],
+};
 ---
 
 <BaseLayout
   title="Blog"
   description="Guías, novedades y consejos sobre las rutas de transporte público en Atlixco."
   canonicalPath={canonicalPath}
+  image={featured[0]?.cover_image_url}
+  noindex={seoNoindex}
+  fullBleed
 >
-  <h1 class="text-3xl font-bold text-ar-oxford mb-1">Blog de Atlixbus</h1>
-  <p class="text-ar-oxford-disabled mb-8">Guías y novedades sobre nuestras rutas</p>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} slot="head" />
+  <script type="application/ld+json" set:html={JSON.stringify(breadcrumbLd)} slot="head" />
+  {page > 1 && <link rel="prev" href={new URL(buildUrl({ page: page - 1 }), SITE_URL).toString()} slot="head" />}
+  {page < totalPages && <link rel="next" href={new URL(buildUrl({ page: page + 1 }), SITE_URL).toString()} slot="head" />}
 
-  {articles.length === 0 ? (
-    <p class="text-ar-oxford-disabled">Todavia no hay articulos publicados.</p>
-  ) : (
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      {articles.map((a) => (
-        <a href={`/blog/${a.slug}`} class="block bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-          {a.cover_image_url && (
-            <img src={a.cover_image_url} alt={a.title} class="w-full h-40 object-cover" loading="lazy" />
-          )}
-          <div class="p-4">
-            <h2 class="font-semibold text-ar-oxford mb-1">{a.title}</h2>
-            {a.excerpt && <p class="text-sm text-ar-oxford-disabled line-clamp-3">{a.excerpt}</p>}
-            {a.published_at && (
-              <p class="text-xs text-ar-oxford-disabled mt-2">
-                {new Date(a.published_at).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
-              </p>
-            )}
-          </div>
-        </a>
-      ))}
+  {/* --- Hero --- */}
+  <div class="bg-ar-oxford text-white">
+    <div class="container mx-auto px-4 pt-10 pb-20">
+      <nav class="text-sm text-white/60 mb-4">
+        <a href="/" class="hover:text-white">Inicio</a> / <span class="text-white">Blog</span>
+      </nav>
+      <h1 class="text-3xl md:text-4xl font-bold mb-2">Blog de Atlixbus</h1>
+      <p class="text-white/70 max-w-xl">Guías, novedades y consejos para moverte por Atlixco sin complicaciones.</p>
+      <p class="text-white/50 text-sm mt-4">
+        {siteTotal} {siteTotal === 1 ? 'artículo publicado' : 'artículos publicados'}
+      </p>
     </div>
-  )}
+  </div>
 
-  {totalPages > 1 && (
-    <nav class="flex justify-center gap-2 mt-10">
-      {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-        
-        <a  href={`/blog?page=${p}`}
-          class={`px-3 py-1.5 rounded-md text-sm font-semibold ${p === page ? 'bg-ar-cerulean text-white' : 'bg-white text-ar-oxford hover:bg-ar-cerulean-disabled'}`}
+  <div class="container mx-auto px-4">
+    {/* --- Buscador flotante --- */}
+    <div class="-mt-10 relative z-10 bg-white rounded-2xl shadow-lg ring-1 ring-black/5 p-4 md:p-5">
+      <form method="get" action="/blog" id="blog-filters" class="flex flex-col md:flex-row gap-3">
+        {tag && <input type="hidden" name="tag" value={tag} />}
+        <div class="flex-1 relative">
+          <svg class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-ar-oxford-disabled" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="search"
+            name="q"
+            value={q}
+            placeholder="Buscar artículos, rutas, consejos..."
+            class="w-full px-4 py-2.5 pl-10 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-ar-cerulean text-ar-oxford"
+          />
+        </div>
+
+        <select
+          name="sort"
+          id="sort-select"
+          class="px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-ar-oxford focus:outline-none focus:ring-2 focus:ring-ar-cerulean"
         >
-          {p}
-        </a>
-      ))}
-    </nav>
-  )}
+          {sortOptions.map((opt) => (
+            <option value={opt.value} selected={opt.value === sort}>{opt.label}</option>
+          ))}
+        </select>
+
+        <button
+          type="submit"
+          class="px-5 py-2.5 bg-ar-cerulean text-white rounded-xl hover:bg-ar-cerulean-hover font-semibold whitespace-nowrap transition-colors"
+        >
+          Buscar
+        </button>
+      </form>
+
+      {allTags.length > 0 && (
+        <div class="flex flex-wrap gap-2 mt-4 pt-4 border-t border-gray-100">
+          <a
+            href={buildUrl({ tag: '', page: 1 })}
+            class={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${!tag ? 'bg-ar-cerulean text-white' : 'bg-ar-cerulean-disabled text-ar-cerulean hover:bg-ar-cerulean-hover hover:text-white'}`}
+          >
+            Todos
+          </a>
+          {allTags.map((t) => (
+            <a
+              href={buildUrl({ tag: t, page: 1 })}
+              class={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${tag === t ? 'bg-ar-cerulean text-white' : 'bg-ar-cerulean-disabled text-ar-cerulean hover:bg-ar-cerulean-hover hover:text-white'}`}
+            >
+              {t}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+
+    {/* --- Destacados: solo en vista por defecto --- */}
+    {featured.length > 0 && (
+      <section class="mt-12">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-ar-oxford-disabled mb-4">Destacados</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {featured.map((a, i) => (
+            <a
+              href={`/blog/${a.slug}`}
+              class={`group relative block rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-shadow ${i === 0 ? 'md:col-span-2 md:row-span-2 aspect-[4/3]' : 'aspect-[16/10]'}`}
+            >
+              {a.cover_image_url ? (
+                <img
+                  src={a.cover_image_url}
+                  alt={a.title}
+                  loading={i === 0 ? 'eager' : 'lazy'}
+                  class="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                />
+              ) : (
+                <div class="absolute inset-0 bg-gradient-to-br from-ar-oxford to-ar-cerulean" />
+              )}
+              <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+              <span class="absolute top-3 left-3 px-2.5 py-1 bg-white/90 backdrop-blur text-ar-oxford text-[10px] font-bold uppercase tracking-wide rounded-full">
+                Destacado
+              </span>
+              <div class="absolute bottom-0 left-0 right-0 p-4 md:p-5">
+                <h3 class={`font-bold text-white leading-snug ${i === 0 ? 'text-xl md:text-2xl mb-1.5' : 'text-base mb-1'}`}>
+                  {a.title}
+                </h3>
+                {i === 0 && a.excerpt && (
+                  <p class="text-white/80 text-sm line-clamp-2 mb-2 max-w-md">{a.excerpt}</p>
+                )}
+                {a.published_at && (
+                  <time datetime={new Date(a.published_at).toISOString()} class="text-white/60 text-xs">
+                    {formatDate(a.published_at)}
+                  </time>
+                )}
+              </div>
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {/* --- Contenido principal + sidebar --- */}
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-10 mt-12 pb-16">
+      <div class="lg:col-span-2">
+        {hasActiveFilters && (
+          <div class="flex items-center justify-between mb-5">
+            <p class="text-sm text-ar-oxford-disabled">
+              <strong class="text-ar-oxford">{total}</strong> {total === 1 ? 'resultado' : 'resultados'}
+              {q && <> para “{q}”</>}
+              {tag && <> en <strong class="text-ar-oxford">{tag}</strong></>}
+            </p>
+            <a href="/blog" class="text-sm text-ar-cerulean hover:underline font-semibold">Quitar filtros</a>
+          </div>
+        )}
+
+        {articles.length === 0 ? (
+          <div class="text-center py-20 bg-white rounded-2xl ring-1 ring-black/5">
+            <svg class="w-10 h-10 mx-auto mb-3 text-ar-oxford-disabled" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            <p class="text-ar-oxford-disabled mb-3">No encontramos artículos con esos filtros.</p>
+            <a href="/blog" class="inline-block px-4 py-2 bg-ar-cerulean text-white rounded-lg hover:bg-ar-cerulean-hover font-semibold text-sm">
+              Ver todos los artículos
+            </a>
+          </div>
+        ) : (
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            {articles.map((a) => (
+              <article class="group bg-white rounded-2xl shadow-sm ring-1 ring-black/5 overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+                <a href={`/blog/${a.slug}`} class="block">
+                  <div class="aspect-video w-full overflow-hidden bg-ar-cerulean-disabled">
+                    {a.cover_image_url ? (
+                      <img
+                        src={a.cover_image_url}
+                        alt={a.title}
+                        loading="lazy"
+                        class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div class="w-full h-full flex items-center justify-center text-ar-cerulean">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M4 6h16M4 6a2 2 0 00-2 2v8a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2H4z" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                  <div class="p-5">
+                    {a.tags && (
+                      <span class="inline-block text-[11px] font-bold uppercase tracking-wide text-ar-cerulean bg-ar-cerulean-disabled px-2 py-0.5 rounded-full mb-2">
+                        {a.tags.split(',')[0].trim()}
+                      </span>
+                    )}
+                    <h2 class="font-bold text-ar-oxford text-lg leading-snug mb-1.5 group-hover:text-ar-cerulean transition-colors">
+                      {a.title}
+                    </h2>
+                    {a.excerpt && <p class="text-sm text-ar-oxford-disabled line-clamp-2 mb-3">{a.excerpt}</p>}
+                    <div class="flex items-center justify-between text-xs text-ar-oxford-disabled">
+                      {a.published_at && (
+                        <time datetime={new Date(a.published_at).toISOString()}>{formatDate(a.published_at)}</time>
+                      )}
+                      <span class="font-semibold text-ar-cerulean opacity-0 group-hover:opacity-100 transition-opacity">
+                        Leer más →
+                      </span>
+                    </div>
+                  </div>
+                </a>
+              </article>
+            ))}
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <nav class="flex items-center justify-center gap-1.5 mt-10">
+            <a
+              href={page > 1 ? buildUrl({ page: page - 1 }) : undefined}
+              aria-disabled={page === 1}
+              class={`px-3 py-1.5 rounded-md text-sm font-semibold ${page === 1 ? 'text-ar-oxford-disabled pointer-events-none' : 'text-ar-oxford hover:bg-ar-cerulean-disabled'}`}
+            >
+              ← Anterior
+            </a>
+            {pageNumbers.map((p) =>
+              p === '...' ? (
+                <span class="px-2 text-ar-oxford-disabled text-sm">…</span>
+              ) : (
+                <a
+                  href={buildUrl({ page: p })}
+                  class={`w-9 h-9 flex items-center justify-center rounded-md text-sm font-semibold ${p === page ? 'bg-ar-cerulean text-white' : 'bg-white text-ar-oxford hover:bg-ar-cerulean-disabled'}`}
+                >
+                  {p}
+                </a>
+              )
+            )}
+            <a
+              href={page < totalPages ? buildUrl({ page: page + 1 }) : undefined}
+              aria-disabled={page === totalPages}
+              class={`px-3 py-1.5 rounded-md text-sm font-semibold ${page === totalPages ? 'text-ar-oxford-disabled pointer-events-none' : 'text-ar-oxford hover:bg-ar-cerulean-disabled'}`}
+            >
+              Siguiente →
+            </a>
+          </nav>
+        )}
+      </div>
+
+      {/* --- Sidebar: descubrimiento --- */}
+      <aside class="lg:sticky lg:top-6 flex flex-col gap-6 h-fit">
+        {allTags.length > 0 && (
+          <div class="bg-white rounded-2xl shadow-sm ring-1 ring-black/5 p-5">
+            <h2 class="font-bold text-ar-oxford text-sm mb-3">Categorías</h2>
+            <div class="flex flex-wrap gap-2">
+              {allTags.map((t) => (
+                <a
+                  href={buildUrl({ tag: t, page: 1 })}
+                  class={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${tag === t ? 'bg-ar-cerulean text-white' : 'bg-ar-cerulean-disabled text-ar-cerulean hover:bg-ar-cerulean-hover hover:text-white'}`}
+                >
+                  {t}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {sidebarRecent.length > 0 && (
+          <div class="bg-white rounded-2xl shadow-sm ring-1 ring-black/5 p-5">
+            <h2 class="font-bold text-ar-oxford text-sm mb-4">Sigue explorando</h2>
+            <ul class="flex flex-col gap-4">
+              {sidebarRecent.map((a) => (
+                <li>
+                  <a href={`/blog/${a.slug}`} class="flex gap-3 group">
+                    <div class="w-16 h-16 shrink-0 rounded-lg overflow-hidden bg-ar-cerulean-disabled">
+                      {a.cover_image_url && (
+                        <img src={a.cover_image_url} alt={a.title} loading="lazy" class="w-full h-full object-cover" />
+                      )}
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-sm font-semibold text-ar-oxford leading-snug line-clamp-2 group-hover:text-ar-cerulean transition-colors">
+                        {a.title}
+                      </p>
+                      {a.published_at && (
+                        <time datetime={new Date(a.published_at).toISOString()} class="text-xs text-ar-oxford-disabled">
+                          {formatDate(a.published_at)}
+                        </time>
+                      )}
+                    </div>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const sortSelect = document.getElementById('sort-select');
+    const form = document.getElementById('blog-filters');
+    sortSelect?.addEventListener('change', () => form?.submit());
+  </script>
 </BaseLayout>

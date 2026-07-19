@@ -19,6 +19,8 @@ async function slugExists(slug, excludeId) {
 export async function listArticles({
   status,
   search,
+  tag,
+  sort = "recent",
   limit = 20,
   offset = 0,
 } = {}) {
@@ -30,24 +32,36 @@ export async function listArticles({
     params.push(status);
   }
   if (search) {
-    conditions.push("(title LIKE ? OR tags LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`);
+    conditions.push("(title LIKE ? OR excerpt LIKE ? OR tags LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  if (tag) {
+    conditions.push("tags LIKE ?");
+    params.push(`%${tag}%`);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const orderBy =
+    {
+      recent: "COALESCE(published_at, created_at) DESC",
+      oldest: "COALESCE(published_at, created_at) ASC",
+      title_asc: "title ASC",
+      title_desc: "title DESC",
+    }[sort] || "COALESCE(published_at, created_at) DESC";
 
   const [rows] = await pool.query(
     `SELECT id, title, slug, excerpt, cover_image_url, tags, status, published_at, created_at, updated_at
      FROM articles
      ${where}
-     ORDER BY COALESCE(published_at, created_at) DESC
+     ORDER BY ${orderBy}
      LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );
   return rows;
 }
 
-export async function countArticles({ status, search } = {}) {
+export async function countArticles({ status, search, tag } = {}) {
   const conditions = [];
   const params = [];
   if (status) {
@@ -55,8 +69,12 @@ export async function countArticles({ status, search } = {}) {
     params.push(status);
   }
   if (search) {
-    conditions.push("(title LIKE ? OR tags LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`);
+    conditions.push("(title LIKE ? OR excerpt LIKE ? OR tags LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  if (tag) {
+    conditions.push("tags LIKE ?");
+    params.push(`%${tag}%`);
   }
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const [rows] = await pool.query(
@@ -64,6 +82,44 @@ export async function countArticles({ status, search } = {}) {
     params,
   );
   return rows[0].total;
+}
+
+// Lista de tags únicos entre los artículos publicados, para los chips de filtro
+export async function getAllTags({ status = "PUBLISHED" } = {}) {
+  const [rows] = await pool.query(
+    `SELECT tags FROM articles WHERE status = ? AND tags IS NOT NULL AND tags != ''`,
+    [status],
+  );
+  const tagSet = new Set();
+  for (const row of rows) {
+    (row.tags || "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .forEach((t) => tagSet.add(t));
+  }
+  return Array.from(tagSet).sort((a, b) => a.localeCompare(b, "es"));
+}
+
+// Artículos recomendados/destacados: los más recientes, opcionalmente excluyendo algunos ids
+export async function getFeaturedArticles({ limit = 3, excludeIds = [] } = {}) {
+  const params = ["PUBLISHED"];
+  let exclude = "";
+  if (excludeIds.length > 0) {
+    exclude = `AND id NOT IN (${excludeIds.map(() => "?").join(",")})`;
+    params.push(...excludeIds);
+  }
+  params.push(limit);
+
+  const [rows] = await pool.query(
+    `SELECT id, title, slug, excerpt, cover_image_url, tags, published_at
+     FROM articles
+     WHERE status = ? ${exclude}
+     ORDER BY COALESCE(published_at, created_at) DESC
+     LIMIT ?`,
+    params,
+  );
+  return rows;
 }
 
 export async function getArticleById(id) {
@@ -243,4 +299,35 @@ export async function setArticleRoutes(articleId, routeGroupIds) {
   } finally {
     conn.release();
   }
+}
+
+export async function getRelatedArticles(articleId, tags, { limit = 3 } = {}) {
+  if (!tags) return [];
+  const firstTag = tags.split(",")[0].trim();
+  if (!firstTag) return [];
+  const [rows] = await pool.query(
+    `SELECT id, title, slug, excerpt, cover_image_url, published_at
+     FROM articles
+     WHERE status = 'PUBLISHED' AND id != ? AND tags LIKE ?
+     ORDER BY COALESCE(published_at, created_at) DESC
+     LIMIT ?`,
+    [articleId, `%${firstTag}%`, limit],
+  );
+  return rows;
+}
+
+export async function getAdjacentArticles(referenceDate) {
+  const [prevRows] = await pool.query(
+    `SELECT slug, title FROM articles
+     WHERE status = 'PUBLISHED' AND COALESCE(published_at, created_at) < ?
+     ORDER BY COALESCE(published_at, created_at) DESC LIMIT 1`,
+    [referenceDate],
+  );
+  const [nextRows] = await pool.query(
+    `SELECT slug, title FROM articles
+     WHERE status = 'PUBLISHED' AND COALESCE(published_at, created_at) > ?
+     ORDER BY COALESCE(published_at, created_at) ASC LIMIT 1`,
+    [referenceDate],
+  );
+  return { prev: prevRows[0] ?? null, next: nextRows[0] ?? null };
 }

@@ -37,3 +37,31 @@ export async function listActiveRoutesForFinder() {
       typeof row.points === "string" ? JSON.parse(row.points) : row.points,
   }));
 }
+
+// Puntos de rutas específicas (por route_group id), para pintarlas en el
+// mapa de "Rutas relacionadas" de un artículo del blog.
+export async function getRoutesWithPointsByIds(groupIds) {
+  if (!groupIds || groupIds.length === 0) return [];
+
+  const [rows] = await pool.query(
+    `SELECT g.id AS group_id,
+            g.route_number,
+            g.name,
+            t.points,
+            t.is_loop
+     FROM route_groups g
+     JOIN route_templates t ON t.id = COALESCE(g.active_route_id, g.default_route_id)
+     WHERE g.id IN (?)
+     ORDER BY g.route_number ASC`,
+    [groupIds],
+  );
+
+  return rows.map((row) => ({
+    groupId: row.group_id,
+    routeNumber: row.route_number,
+    name: row.name,
+    isLoop: !!row.is_loop,
+    points:
+      typeof row.points === "string" ? JSON.parse(row.points) : row.points,
+  }));
+}

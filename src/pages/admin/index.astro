@@ -4,12 +4,40 @@ import { requireRole } from '../../lib/guards.js';
 
 const guardResponse = requireRole(Astro, 'ADMIN');
 if (guardResponse) return guardResponse;
+
+const sections = [
+  {
+    href: '/admin/rutas',
+    title: 'Rutas',
+    description: 'Grupos de ruta, plantillas, tarifas y programador',
+  },
+  {
+    href: '/admin/blog',
+    title: 'Blog',
+    description: 'Articulos para SEO y contenido de rutas',
+  },
+  {
+    href: '/admin/eventos',
+    title: 'Eventos',
+    description: 'Paginas de evento con directorio de rutas',
+  },
+];
 ---
 
 <BaseLayout title="Administración">
-  <h1 class="text-2xl font-bold">Panel de administración</h1>
-  <p class="text-ar-oxford-disabled">
-    Solo visible para usuarios con rol ADMIN. Si ves esta página, el
-    control de acceso por rol está funcionando.
-  </p>
+  <h1 class="text-2xl font-bold text-ar-oxford mb-1">Panel de administración</h1>
+  <p class="text-ar-oxford-disabled mb-8">Solo visible para usuarios con rol ADMIN.</p>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    {sections.map((s) => (
+      <a
+        href={s.href}
+        class="block bg-white rounded-lg shadow-sm p-6 hover:shadow-md transition-shadow border border-gray-100"
+      >
+        <h2 class="font-semibold text-ar-oxford text-lg mb-1">{s.title}</h2>
+        <p class="text-sm text-ar-oxford-disabled">{s.description}</p>
+        <span class="inline-block mt-4 text-ar-cerulean font-semibold text-sm">Administrar &rarr;</span>
+      </a>
+    ))}
+  </div>
 </BaseLayout>

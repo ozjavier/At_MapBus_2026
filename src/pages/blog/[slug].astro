@@ -1,7 +1,14 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { getArticleBySlug, getArticleRoutes } from '../../lib/articles.js';
-import { SITE_URL } from '../../lib/site.js';
+import {
+  getArticleBySlug,
+  getArticleRoutes,
+  getRelatedArticles,
+  getAdjacentArticles,
+} from '../../lib/articles.js';
+import { getRoutesWithPointsByIds } from '../../lib/publicRoutes.js';
+import { buildTableOfContents } from '../../lib/toc.js';
+import { SITE_URL, SITE_NAME } from '../../lib/site.js';
 
 const slug = Astro.params.slug as string;
 const article = await getArticleBySlug(slug);
@@ -10,10 +17,28 @@ if (!article) {
   return new Response('Articulo no encontrado', { status: 404 });
 }
 
+const referenceDate = article.published_at ?? article.created_at;
+
 const relatedRoutes = await getArticleRoutes(article.id);
+const [relatedRoutesWithPoints, relatedArticles, adjacent] = await Promise.all([
+  getRoutesWithPointsByIds(relatedRoutes.map((r) => r.id)),
+  getRelatedArticles(article.id, article.tags, { limit: 3 }),
+  getAdjacentArticles(referenceDate),
+]);
+
+const { html: contentHtmlWithIds, toc } = buildTableOfContents(article.content_html);
 
 const canonicalPath = `/blog/${article.slug}`;
 const description = article.meta_description || article.excerpt || undefined;
+
+const plainText = (article.content_html || '').replace(/<[^>]+>/g, ' ');
+const wordCount = plainText.trim().split(/\s+/).filter(Boolean).length;
+const readingMinutes = Math.max(1, Math.round(wordCount / 200));
+
+const tagList = (article.tags || '')
+  .split(',')
+  .map((t) => t.trim())
+  .filter(Boolean);
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -23,8 +48,11 @@ const jsonLd = {
   image: article.cover_image_url ? new URL(article.cover_image_url, SITE_URL).toString() : undefined,
   datePublished: article.published_at,
   dateModified: article.updated_at,
+  timeRequired: `PT${readingMinutes}M`,
+  articleSection: 'Blog',
+  keywords: tagList.length ? tagList.join(', ') : undefined,
   mainEntityOfPage: new URL(canonicalPath, SITE_URL).toString(),
-  publisher: { '@type': 'Organization', name: 'Atlixbus' },
+  publisher: { '@type': 'Organization', name: SITE_NAME },
 };
 
 const breadcrumbLd = {
@@ -36,6 +64,20 @@ const breadcrumbLd = {
     { '@type': 'ListItem', position: 3, name: article.title, item: new URL(canonicalPath, SITE_URL).toString() },
   ],
 };
+
+const formattedDate = article.published_at
+  ? new Date(article.published_at).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })
+  : null;
+
+const routesJson = JSON.stringify(relatedRoutesWithPoints);
+
+// Misma paleta que usa el script del mapa — se comparte para pintar el punto
+// de color junto a cada ruta en la lista y que el usuario sepa cuál es cuál
+// sin tener que darle clic primero.
+const MAP_COLORS = ['#007991', '#F9A03F', '#EF476F', '#118AB2', '#06A77D', '#7B2CBF'];
+
+const shareUrl = new URL(canonicalPath, SITE_URL).toString();
+const shareText = encodeURIComponent(article.title);
 ---
 
 <BaseLayout
@@ -46,39 +88,501 @@ const breadcrumbLd = {
 >
   <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} slot="head" />
   <script type="application/ld+json" set:html={JSON.stringify(breadcrumbLd)} slot="head" />
+  {tagList.length > 0 && <meta name="keywords" content={tagList.join(', ')} slot="head" />}
 
-  <nav class="text-sm text-ar-oxford-disabled mb-4">
-    <a href="/blog" class="hover:underline">Blog</a> / {article.title}
+  <!-- Breadcrumb -->
+  <nav aria-label="Breadcrumb" class="text-sm text-ar-oxford-disabled mb-6 max-w-7xl mx-auto">
+    <a href="/blog" class="hover:text-ar-cerulean hover:underline transition-colors">Blog</a>
+    <span class="mx-1.5">/</span>
+    <span class="text-ar-oxford font-medium">{article.title}</span>
   </nav>
 
-  <article class="max-w-3xl mx-auto">
-    <h1 class="text-3xl font-bold text-ar-oxford mb-2">{article.title}</h1>
-    {article.published_at && (
-      <p class="text-sm text-ar-oxford-disabled mb-6">
-        Publicado el {new Date(article.published_at).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
-      </p>
+  <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8 items-start">
+    <!-- Tabla de contenidos (desktop, sticky) -->
+    {toc.length > 0 && (
+      <aside class="hidden lg:block">
+        <div class="sticky top-6 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+          <p class="text-xs font-bold uppercase tracking-wide text-ar-oxford-disabled mb-3">
+            En este artículo
+          </p>
+          <nav>
+            <ul class="space-y-1 text-sm border-l-2 border-gray-100">
+              {toc.map((item) => (
+                <li>
+                  <a
+                    href={`#${item.id}`}
+                    data-toc-id={item.id}
+                    class={`toc-link block leading-snug py-1 -ml-0.5 pl-4 border-l-2 border-transparent text-ar-oxford-disabled hover:text-ar-cerulean transition-colors ${
+                      item.level === 3 ? 'pl-7' : item.level === 4 ? 'pl-10 text-xs' : ''
+                    }`}
+                  >
+                    {item.text}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </div>
+      </aside>
     )}
 
-    {article.cover_image_url && (
-      <img src={article.cover_image_url} alt={article.title} class="w-full rounded-lg mb-6" />
-    )}
+    <!-- Artículo -->
+    <article class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 sm:p-10 min-w-0">
+      <header class="mb-8">
+        {tagList.length > 0 && (
+          <div class="flex flex-wrap gap-2 mb-4">
+            {tagList.map((tag) => (
+              <a
+                href={`/blog?tag=${encodeURIComponent(tag)}`}
+                class="px-2.5 py-1 bg-ar-saffron/20 text-ar-oxford text-xs font-semibold rounded-full hover:bg-ar-saffron/40 transition-colors"
+              >
+                #{tag}
+              </a>
+            ))}
+          </div>
+        )}
 
-    <div
-      class="prose max-w-none prose-headings:text-ar-oxford prose-a:text-ar-cerulean"
-      set:html={article.content_html}
-    />
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-ar-oxford leading-tight mb-3 tracking-tight">
+          {article.title}
+        </h1>
 
-    {relatedRoutes.length > 0 && (
-      <div class="mt-10 pt-6 border-t border-gray-200">
-        <h2 class="font-semibold text-ar-oxford mb-3">Rutas relacionadas</h2>
-        <div class="flex flex-wrap gap-2">
-          {relatedRoutes.map((r) => (
-            <span class="px-3 py-1.5 bg-ar-cerulean-disabled text-ar-cerulean rounded-full text-sm font-semibold">
-              Ruta {r.route_number} {r.name ? `— ${r.name}` : ''}
+        {article.excerpt && (
+          <p class="text-lg text-ar-oxford-disabled leading-relaxed mb-4">
+            {article.excerpt}
+          </p>
+        )}
+
+        <div class="flex flex-wrap items-center gap-3 text-sm text-ar-oxford-disabled border-t border-b border-gray-100 py-3">
+          {formattedDate && (
+            <span class="flex items-center gap-1.5">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                <path d="M16 2v4M8 2v4M3 10h18"></path>
+              </svg>
+              <time datetime={new Date(article.published_at).toISOString()}>{formattedDate}</time>
             </span>
-          ))}
+          )}
+          <span class="text-gray-300">&bull;</span>
+          <span class="flex items-center gap-1.5">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M12 6v6l4 2"></path>
+            </svg>
+            {readingMinutes} min de lectura
+          </span>
+        </div>
+      </header>
+
+      {article.cover_image_url && (
+        <img
+          src={article.cover_image_url}
+          alt={article.title}
+          class="w-full rounded-xl mb-10 shadow-sm object-cover max-h-[420px]"
+          loading="eager"
+        />
+      )}
+
+      <!-- Índice (mobile, colapsable) -->
+      {toc.length > 0 && (
+        <details class="lg:hidden mb-8 bg-gray-50 rounded-lg border border-gray-200 p-4">
+          <summary class="cursor-pointer font-semibold text-ar-oxford text-sm select-none">
+            Contenido del artículo
+          </summary>
+          <ul class="mt-3 space-y-2 text-sm">
+            {toc.map((item) => (
+              <li class={item.level === 3 ? 'pl-3' : item.level === 4 ? 'pl-6' : ''}>
+                <a href={`#${item.id}`} data-toc-id={item.id} class="toc-link text-ar-cerulean hover:underline">
+                  {item.text}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <div
+        class="prose prose-lg max-w-none
+               prose-headings:text-ar-oxford prose-headings:font-bold prose-headings:tracking-tight prose-headings:scroll-mt-24
+               prose-h2:text-2xl prose-h2:mt-10 prose-h2:mb-4 prose-h2:pb-2 prose-h2:border-b prose-h2:border-gray-100
+               prose-h3:text-xl prose-h3:mt-8 prose-h3:mb-3
+               prose-p:text-ar-oxford prose-p:leading-relaxed
+               prose-a:text-ar-cerulean prose-a:font-medium prose-a:no-underline hover:prose-a:underline
+               prose-strong:text-ar-oxford
+               prose-blockquote:border-l-4 prose-blockquote:border-ar-cerulean prose-blockquote:bg-ar-cerulean-disabled/40 prose-blockquote:py-1 prose-blockquote:px-4 prose-blockquote:not-italic prose-blockquote:rounded-r-md
+               prose-img:rounded-lg prose-img:shadow-sm
+               prose-li:text-ar-oxford prose-li:marker:text-ar-cerulean
+               prose-code:text-ar-folly prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none"
+        set:html={contentHtmlWithIds}
+      />
+
+      <!-- Compartir -->
+      <div class="flex items-center gap-3 mt-10 pt-6 border-t border-gray-100">
+        <span class="text-sm font-semibold text-ar-oxford-disabled">Compartir:</span>
+        <a
+          href={`https://wa.me/?text=${shareText}%20${shareUrl}`}
+          target="_blank" rel="noopener" aria-label="Compartir en WhatsApp"
+          class="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-ar-oxford-disabled hover:border-ar-cerulean hover:text-ar-cerulean hover:bg-ar-cerulean-disabled/40 transition-colors"
+        >
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M17.6 6.3A8.9 8.9 0 0012 4a8.9 8.9 0 00-7.7 13.4L3 21l3.7-1.2A8.9 8.9 0 0012 21a8.9 8.9 0 006.3-15.7zM12 19.3a7.4 7.4 0 01-3.8-1l-.3-.2-2.5.8.8-2.4-.2-.3A7.4 7.4 0 1119.4 12 7.4 7.4 0 0112 19.3z" /></svg>
+        </a>
+        <a
+          href={`https://www.facebook.com/sharer/sharer.php?u=${shareUrl}`}
+          target="_blank" rel="noopener" aria-label="Compartir en Facebook"
+          class="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-ar-oxford-disabled hover:border-ar-cerulean hover:text-ar-cerulean hover:bg-ar-cerulean-disabled/40 transition-colors"
+        >
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M22 12a10 10 0 10-11.6 9.9v-7H7.9V12h2.5V9.8c0-2.5 1.5-3.9 3.8-3.9 1.1 0 2.2.2 2.2.2v2.5h-1.3c-1.2 0-1.6.8-1.6 1.6V12h2.8l-.4 2.9h-2.4v7A10 10 0 0022 12z" /></svg>
+        </a>
+        <a
+          href={`https://twitter.com/intent/tweet?text=${shareText}&url=${shareUrl}`}
+          target="_blank" rel="noopener" aria-label="Compartir en X"
+          class="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-ar-oxford-disabled hover:border-ar-cerulean hover:text-ar-cerulean hover:bg-ar-cerulean-disabled/40 transition-colors"
+        >
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M18.9 2H22l-7.6 8.7L23 22h-6.9l-5.4-6.7L4.4 22H1.3l8.1-9.3L1 2h7l4.9 6.1L18.9 2zm-1.2 18h1.9L7.4 4H5.4l12.3 16z" /></svg>
+        </a>
+        <button
+          type="button"
+          id="copy-link-btn"
+          aria-label="Copiar enlace"
+          data-url={shareUrl}
+          class="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-ar-oxford-disabled hover:border-ar-cerulean hover:text-ar-cerulean hover:bg-ar-cerulean-disabled/40 transition-colors"
+        >
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.07 0l1.94-1.94a5 5 0 00-7.07-7.07L10.5 5.5M14 11a5 5 0 00-7.07 0L4.99 12.94a5 5 0 007.07 7.07L13.5 18.5" /></svg>
+        </button>
+      </div>
+
+      <!-- Navegación anterior / siguiente -->
+      {(adjacent.prev || adjacent.next) && (
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6">
+          {adjacent.prev ? (
+            <a href={`/blog/${adjacent.prev.slug}`} class="group p-4 rounded-xl border border-gray-200 hover:border-ar-cerulean hover:bg-ar-cerulean-disabled/20 transition-colors">
+              <span class="text-xs text-ar-oxford-disabled block mb-1">&larr; Artículo anterior</span>
+              <span class="font-semibold text-ar-oxford group-hover:text-ar-cerulean text-sm line-clamp-2">{adjacent.prev.title}</span>
+            </a>
+          ) : <div />}
+          {adjacent.next ? (
+            <a href={`/blog/${adjacent.next.slug}`} class="group p-4 rounded-xl border border-gray-200 hover:border-ar-cerulean hover:bg-ar-cerulean-disabled/20 transition-colors text-right">
+              <span class="text-xs text-ar-oxford-disabled block mb-1">Siguiente artículo &rarr;</span>
+              <span class="font-semibold text-ar-oxford group-hover:text-ar-cerulean text-sm line-clamp-2">{adjacent.next.title}</span>
+            </a>
+          ) : <div />}
+        </div>
+      )}
+    </article>
+  </div>
+
+  <!-- Rutas relacionadas: mapa + lista -->
+  {relatedRoutesWithPoints.length > 0 && (
+    <section class="max-w-7xl mx-auto mt-14 pt-10 border-t border-gray-200">
+      <div class="mb-6 max-w-3xl flex items-start justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-ar-oxford mb-1">Rutas relacionadas</h2>
+          <p class="text-ar-oxford-disabled">
+            Estas son las rutas de Atlixbus que tienen que ver con este artículo. Selecciona una para verla en el mapa.
+          </p>
+        </div>
+        <span class="hidden sm:inline-flex shrink-0 items-center px-2.5 py-1 rounded-full bg-ar-cerulean-disabled/40 text-ar-cerulean text-xs font-semibold">
+          {relatedRoutesWithPoints.length} {relatedRoutesWithPoints.length === 1 ? 'ruta' : 'rutas'}
+        </span>
+      </div>
+
+      <div
+        id="related-routes-root"
+        data-routes={routesJson}
+        class="related-routes-grid grid grid-cols-1 lg:grid-cols-[minmax(0,320px)_1fr] gap-4 bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100"
+      >
+        <!-- Lista -->
+        <div id="related-routes-sidebar" class="p-4 lg:border-r border-gray-100 max-h-[420px] lg:max-h-[480px] overflow-y-auto">
+          <ul id="related-routes-list" class="space-y-2">
+            {relatedRoutesWithPoints.map((r, i) => (
+              <li>
+                <button
+                  type="button"
+                  data-route-index={i}
+                  class="related-route-item w-full text-left px-3 py-2.5 rounded-lg border border-gray-200 hover:border-ar-cerulean hover:bg-ar-cerulean-disabled/40 hover:translate-x-0.5 transition-all flex items-center justify-between gap-2"
+                >
+                  <span class="flex items-center gap-2.5 min-w-0">
+                    <span
+                      class="w-2.5 h-2.5 rounded-full shrink-0 ring-2 ring-white shadow"
+                      style={`background-color:${MAP_COLORS[i % MAP_COLORS.length]}`}
+                    ></span>
+                    <span class="block font-semibold text-ar-oxford text-sm truncate">
+                      Ruta {r.routeNumber} {r.name ? `— ${r.name}` : ''}
+                    </span>
+                  </span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-ar-cerulean shrink-0">
+                    <path d="M9 18l6-6-6-6"></path>
+                  </svg>
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <div class="flex items-center justify-between mt-4">
+            <button
+              type="button"
+              id="related-routes-reset"
+              class="text-sm font-semibold text-ar-oxford-disabled hover:text-ar-cerulean transition-colors"
+            >
+              Ver todas
+            </button>
+            <a href="/" class="inline-flex items-center gap-1.5 text-sm font-semibold text-ar-cerulean hover:underline">
+              Buscar mi viaje &rarr;
+            </a>
+          </div>
+        </div>
+
+        <!-- Mapa -->
+        <div class="relative">
+          <div id="related-routes-map" class="w-full h-[320px] lg:h-[480px] bg-gray-50"></div>
+
+          <div id="related-map-loading" class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gray-50 text-ar-oxford-disabled text-sm">
+            <svg class="animate-spin" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" opacity="0.25"></circle>
+              <path d="M12 2a10 10 0 010 20" stroke-linecap="round"></path>
+            </svg>
+            Cargando mapa...
+          </div>
+
+          <button
+            type="button"
+            id="related-map-fullscreen-btn"
+            title="Ver mapa en pantalla completa"
+            class="absolute top-3 right-3 z-[500] bg-white shadow-md rounded-md p-2 hover:bg-gray-50 transition-colors"
+          >
+            <svg id="expand-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+            </svg>
+            <svg id="collapse-icon" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3v3a2 2 0 0 1-2 2H3M16 3v3a2 2 0 0 0 2 2h3M21 16h-3a2 2 0 0 0-2 2v3M3 16h3a2 2 0 0 1 2 2v3"></path>
+            </svg>
+          </button>
+
+          <p id="related-map-error" class="hidden absolute top-3 left-3 right-16 text-xs text-ar-folly bg-white px-3 py-2 rounded-md shadow">
+            No se pudo iniciar el mapa. Revisa la consola del navegador (F12).
+          </p>
         </div>
       </div>
-    )}
-  </article>
+    </section>
+  )}
+
+  <!-- También te puede interesar -->
+  {relatedArticles.length > 0 && (
+    <section class="max-w-7xl mx-auto mt-14 pt-10 border-t border-gray-200 pb-16">
+      <h2 class="text-2xl font-bold text-ar-oxford mb-5">También te puede interesar</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+        {relatedArticles.map((a) => (
+          <a href={`/blog/${a.slug}`} class="group bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+            <div class="aspect-video w-full overflow-hidden bg-ar-cerulean-disabled">
+              {a.cover_image_url && (
+                <img src={a.cover_image_url} alt={a.title} loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+              )}
+            </div>
+            <div class="p-4">
+              <h3 class="font-semibold text-ar-oxford text-sm leading-snug line-clamp-2 group-hover:text-ar-cerulean transition-colors">{a.title}</h3>
+              {a.published_at && (
+                <time datetime={new Date(a.published_at).toISOString()} class="text-xs text-ar-oxford-disabled mt-1.5 block">
+                  {new Date(a.published_at).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
+                </time>
+              )}
+            </div>
+          </a>
+        ))}
+      </div>
+    </section>
+  )}
+
+<style>
+  .related-routes-grid.is-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: white;
+    border-radius: 0;
+    padding: 1rem;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 1rem;
+    overflow: hidden;
+  }
+
+  @media (max-width: 1023px) {
+    .related-routes-grid.is-fullscreen {
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(0, 40%) 1fr;
+    }
+  }
+
+  .related-routes-grid.is-fullscreen #related-routes-sidebar {
+    max-height: 100%;
+    border-right: 1px solid #f3f4f6;
+  }
+
+  .related-routes-grid.is-fullscreen #related-routes-map {
+    height: 100% !important;
+  }
+</style>
 </BaseLayout>
+
+<script>
+  const tocLinks = Array.from(document.querySelectorAll('.toc-link'));
+
+  if (tocLinks.length > 0) {
+    const headingEls = tocLinks
+      .map((link) => document.getElementById(link.dataset.tocId))
+      .filter(Boolean);
+
+    const setActive = (id) => {
+      tocLinks.forEach((link) => {
+        const isActive = link.dataset.tocId === id;
+        link.classList.toggle('text-ar-cerulean', isActive);
+        link.classList.toggle('border-ar-cerulean', isActive);
+        link.classList.toggle('font-semibold', isActive);
+        link.classList.toggle('text-ar-oxford-disabled', !isActive);
+      });
+    };
+
+    if (headingEls[0]) setActive(headingEls[0].id);
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting);
+        if (visible.length === 0) return;
+
+        const topMost = visible.reduce((a, b) =>
+          a.boundingClientRect.top < b.boundingClientRect.top ? a : b,
+        );
+        setActive(topMost.target.id);
+      },
+      {
+        rootMargin: '-15% 0px -70% 0px',
+        threshold: 0,
+      },
+    );
+
+    headingEls.forEach((el) => observer.observe(el));
+  }
+
+  // Copiar enlace
+  const copyBtn = document.getElementById('copy-link-btn');
+  copyBtn?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(copyBtn.dataset.url || window.location.href);
+      const original = copyBtn.innerHTML;
+      copyBtn.innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>';
+      setTimeout(() => { copyBtn.innerHTML = original; }, 1500);
+    } catch (err) {
+      console.error('No se pudo copiar el enlace:', err);
+    }
+  });
+</script>
+
+<script>
+  import L from 'leaflet';
+  import 'leaflet/dist/leaflet.css';
+
+  const ATLIXCO_CENTER = [18.9099148, -98.4368282];
+  const COLORS = ['#007991', '#F9A03F', '#EF476F', '#118AB2', '#06A77D', '#7B2CBF'];
+
+  const root = document.getElementById('related-routes-root');
+  const mapEl = document.getElementById('related-routes-map');
+  const errorEl = document.getElementById('related-map-error');
+  const loadingEl = document.getElementById('related-map-loading');
+
+  if (root && mapEl) {
+    try {
+      const routes = JSON.parse(root.dataset.routes || '[]');
+
+      delete L.Icon.Default.prototype._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+      });
+
+      const map = L.map(mapEl).setView(ATLIXCO_CENTER, 14);
+      const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      }).addTo(map);
+
+      // Oculta el estado de carga en cuanto los tiles terminan de pintarse
+      tileLayer.once('load', () => loadingEl?.classList.add('hidden'));
+      // Respaldo por si el evento 'load' no dispara (tiles cacheados, etc.)
+      setTimeout(() => loadingEl?.classList.add('hidden'), 1200);
+
+      const routeLayers = routes.map((route, i) => {
+        const points = Array.isArray(route.points) ? route.points : [];
+        if (points.length === 0) return null;
+
+        const routePoints = route.isLoop ? [...points, points[0]] : points;
+        const latlngs = routePoints.map((p) => [p.lat, p.lng]);
+        const color = COLORS[i % COLORS.length];
+
+        const line = L.polyline(latlngs, { color, weight: 4, opacity: 0.85 }).addTo(map);
+        line.bindPopup(`<strong>Ruta ${route.routeNumber}</strong>${route.name ? ` — ${route.name}` : ''}`);
+        return line;
+      });
+
+      const validLayers = routeLayers.filter(Boolean);
+      const fitAll = () => {
+        if (validLayers.length === 0) return;
+        const group = L.featureGroup(validLayers);
+        map.fitBounds(group.getBounds(), { padding: [30, 30] });
+      };
+      fitAll();
+
+      document.querySelectorAll('.related-route-item').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.dataset.routeIndex);
+          const layer = routeLayers[idx];
+          if (!layer) return;
+
+          document.querySelectorAll('.related-route-item').forEach((b) =>
+            b.classList.remove('border-ar-cerulean', 'bg-ar-cerulean-disabled/40'),
+          );
+          btn.classList.add('border-ar-cerulean', 'bg-ar-cerulean-disabled/40');
+
+          map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+          layer.openPopup(layer.getBounds().getCenter());
+        });
+      });
+
+      document.getElementById('related-routes-reset')?.addEventListener('click', () => {
+        document.querySelectorAll('.related-route-item').forEach((b) =>
+          b.classList.remove('border-ar-cerulean', 'bg-ar-cerulean-disabled/40'),
+        );
+        fitAll();
+      });
+
+      // --- Pantalla completa (mantiene el sidebar visible) ---
+      const gridRoot = document.getElementById('related-routes-root');
+      const fullscreenBtn = document.getElementById('related-map-fullscreen-btn');
+      const expandIcon = document.getElementById('expand-icon');
+      const collapseIcon = document.getElementById('collapse-icon');
+
+      const setFullscreen = (isFullscreen) => {
+        gridRoot?.classList.toggle('is-fullscreen', isFullscreen);
+        expandIcon?.classList.toggle('hidden', isFullscreen);
+        collapseIcon?.classList.toggle('hidden', !isFullscreen);
+        fullscreenBtn?.setAttribute('title', isFullscreen ? 'Salir de pantalla completa' : 'Ver mapa en pantalla completa');
+        document.body.style.overflow = isFullscreen ? 'hidden' : '';
+        setTimeout(() => map.invalidateSize(), 150);
+      };
+
+      fullscreenBtn?.addEventListener('click', () => {
+        setFullscreen(!gridRoot?.classList.contains('is-fullscreen'));
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && gridRoot?.classList.contains('is-fullscreen')) {
+          setFullscreen(false);
+        }
+      });
+
+      setTimeout(() => map.invalidateSize(), 200);
+    } catch (err) {
+      console.error('Error al iniciar el mapa de rutas relacionadas:', err);
+      errorEl?.classList.remove('hidden');
+      loadingEl?.classList.add('hidden');
+    }
+  }
+</script>

@@ -30,13 +30,13 @@ const routesJson = JSON.stringify(routes);
           <!-- Origen / destino agrupados -->
           <div class="relative space-y-2">
             <div
-              class="hidden lg:block absolute left-[11px] top-[26px] bottom-[38px] w-px bg-gray-200"
+              class="hidden lg:block absolute left-[11px] top-[26px] bottom-[13px] w-px bg-gray-200"
               aria-hidden="true"
             ></div>
 
             <!-- Origen -->
             <div class="flex items-center gap-2">
-              <span class="shrink-0 w-5 h-5 rounded-full bg-ar-cerulean text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white shadow-sm">A</span>
+              <span class="shrink-0 w-5 h-5 rounded-full bg-ar-cerulean text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white shadow-sm z-1">A</span>
               <div class="flex-1 relative">
                 <input
                   id="start-input"
@@ -95,7 +95,7 @@ const routesJson = JSON.stringify(routes);
 
             <!-- Destino -->
             <div class="flex items-center gap-2">
-              <span class="shrink-0 w-5 h-5 rounded-full bg-ar-folly text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white shadow-sm">B</span>
+              <span class="shrink-0 w-5 h-5 rounded-full bg-ar-folly text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white shadow-sm z-1">B</span>
               <div class="flex-1 relative">
                 <input
                   id="end-input"
