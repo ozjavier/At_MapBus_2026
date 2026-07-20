@@ -9,7 +9,7 @@ import pool from "./db.js";
 export async function listFavoritesByUser(userId) {
   const [rows] = await pool.query(
     `SELECT f.id AS favorite_id, f.route_group_id, f.notify_changes, f.created_at,
-            g.route_number, g.name,
+            g.route_number, g.name, g.is_manually_locked, g.manual_lock_reason,
             t.points, t.is_loop, t.fare_price
      FROM route_favorites f
      JOIN route_groups g ON g.id = f.route_group_id
@@ -23,6 +23,8 @@ export async function listFavoritesByUser(userId) {
     favoriteId: row.favorite_id,
     routeGroupId: row.route_group_id,
     notifyChanges: !!row.notify_changes,
+    isManuallyLocked: !!row.is_manually_locked,
+    manualLockReason: row.manual_lock_reason,
     createdAt: row.created_at,
     routeNumber: row.route_number,
     name: row.name,

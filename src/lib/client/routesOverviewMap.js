@@ -28,15 +28,20 @@ const LINE_COLORS = [
 const OPACITY = { normal: 0.85, selected: 1, dimmed: 0.15 };
 const WEIGHT = { normal: 5, selected: 6, dimmed: 4 };
 const STOP_RADIUS = { normal: 5, hover: 7, terminal: 8 };
+const ALERT_DASH = "10 6";
 
 export class RoutesOverviewMap {
   /**
    * @param {Object} opts
    * @param {HTMLElement} opts.mapContainer
-   * @param {Array} opts.routes - salida de listActiveRoutesForFinder()
+   * @param {Array} opts.routes - salida de listActiveRoutesForFinder(), ya
+   *   incluye isManuallyLocked/manualLockReason por ruta
    * @param {HTMLElement} opts.listContainer
    * @param {HTMLElement} [opts.mapErrorContainer]
    * @param {HTMLElement} [opts.emptyStateContainer]
+   * @param {HTMLElement} [opts.alertsContainer] - si se pasa, muestra un
+   *   resumen de rutas con desvío activo arriba de la lista. Opcional:
+   *   si no se pasa, simplemente no se renderiza nada ahí.
    * @param {Array<string>} [opts.favoriteIds] - route_group_id del usuario logueado
    */
   constructor({
@@ -45,12 +50,14 @@ export class RoutesOverviewMap {
     listContainer,
     mapErrorContainer,
     emptyStateContainer,
+    alertsContainer,
     favoriteIds,
   }) {
     this.routes = Array.isArray(routes) ? routes : [];
     this.listContainer = listContainer;
     this.mapErrorContainer = mapErrorContainer;
     this.emptyStateContainer = emptyStateContainer;
+    this.alertsContainer = alertsContainer;
     this.favoriteIds = new Set(favoriteIds ?? []);
 
     // groupId -> { color, route, polyline, stopMarkers: L.CircleMarker[], arrowMarkers: L.Marker[] }
@@ -98,6 +105,7 @@ export class RoutesOverviewMap {
 
     this.drawRoutes();
     this.renderList();
+    this.renderAlertsSummary();
   }
 
   showMapError() {
@@ -123,15 +131,22 @@ export class RoutesOverviewMap {
       const latlngs = orderedPoints.map((p) => [p.lat, p.lng]);
 
       // --- Línea del recorrido ---
+      // Si la ruta tiene un desvío de emergencia activo, se dibuja con
+      // trazo punteado además de su color habitual: sigue siendo
+      // identificable, pero se ve visualmente distinta de su recorrido normal.
       const polyline = L.polyline(latlngs, {
         color,
         weight: WEIGHT.normal,
         opacity: OPACITY.normal,
         lineCap: "round",
         lineJoin: "round",
+        dashArray: route.isManuallyLocked ? ALERT_DASH : null,
       }).addTo(this.map);
 
-      polyline.bindTooltip(this.routeLabel(route), { sticky: true });
+      const tooltipText = route.isManuallyLocked
+        ? `${this.routeLabel(route)} — ⚠ Desvío activo${route.manualLockReason ? `: ${route.manualLockReason}` : ""}`
+        : this.routeLabel(route);
+      polyline.bindTooltip(tooltipText, { sticky: true });
       polyline.on("click", () => this.selectRoute(route.groupId));
       polyline.on("mouseover", () => this.previewHover(route.groupId, true));
       polyline.on("mouseout", () => this.previewHover(route.groupId, false));
@@ -244,6 +259,13 @@ export class RoutesOverviewMap {
         : 0;
       const isFavorite = this.favoriteIds.has(route.groupId);
 
+      const alertChip = route.isManuallyLocked
+        ? `<span
+            class="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-ar-folly bg-ar-folly-disabled px-1.5 py-0.5 rounded"
+            title="${escapeHtml(route.manualLockReason || "Desvío de emergencia activo")}"
+          >⚠ Desvío de emergencia</span>`
+        : "";
+
       // Nota: ya no es un solo <button> — un botón de "seleccionar" y el
       // botón de estrella van como hermanos, no anidados (un <button>
       // dentro de otro <button> es HTML inválido y rompe el click de la
@@ -273,6 +295,7 @@ export class RoutesOverviewMap {
               ${route.name ? `<span class="truncate">${escapeHtml(route.name)}</span><span>&middot;</span>` : ""}
               <span class="whitespace-nowrap">${stopCount} parada${stopCount === 1 ? "" : "s"}</span>
             </span>
+            ${alertChip ? `<span class="block">${alertChip}</span>` : ""}
           </span>
           ${route.farePrice != null ? `<span class="shrink-0 text-xs font-semibold text-ar-oxford-disabled">$${route.farePrice}</span>` : ""}
         </button>
@@ -286,6 +309,35 @@ export class RoutesOverviewMap {
       }
       this.listContainer.appendChild(wrapper);
     });
+  }
+
+  // Resumen opcional arriba de la lista: solo aparece si hay al menos una
+  // ruta con desvío activo, y solo si se pasó un `alertsContainer`.
+  renderAlertsSummary() {
+    if (!this.alertsContainer) return;
+
+    const alerted = this.routes.filter((r) => r.isManuallyLocked);
+    if (alerted.length === 0) {
+      this.alertsContainer.classList.add("hidden");
+      this.alertsContainer.innerHTML = "";
+      return;
+    }
+
+    this.alertsContainer.classList.remove("hidden");
+    this.alertsContainer.innerHTML = `
+      <div class="bg-ar-folly-disabled border border-ar-folly rounded-lg p-3 mb-4">
+        <p class="text-sm font-bold text-ar-folly mb-1">
+          ⚠ ${alerted.length} ruta${alerted.length === 1 ? "" : "s"} con desvío activo
+        </p>
+        <ul class="text-xs text-ar-oxford space-y-0.5">
+          ${alerted
+            .map(
+              (r) =>
+                `<li>Ruta ${escapeHtml(String(r.routeNumber))}${r.manualLockReason ? `: ${escapeHtml(r.manualLockReason)}` : ""}</li>`,
+            )
+            .join("")}
+        </ul>
+      </div>`;
   }
 
   // --- Interacción: hover / selección --------------------------------------

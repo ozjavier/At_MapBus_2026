@@ -62,6 +62,39 @@ const ogImage = image ? new URL(image, SITE_URL).toString() : undefined;
           <a href="/blog">Blog</a>
           <a href="/eventos">Eventos</a>
 
+          {user && (
+            <div id="notification-bell-root" class="relative">
+              <button
+                type="button"
+                id="notification-bell-btn"
+                class="cursor-pointer relative p-2 -mx-2 rounded-md hover:bg-white/10 transition-colors"
+                aria-label="Notificaciones"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+                <span
+                  id="notification-bell-badge"
+                  class="hidden absolute -top-1 -right-1 bg-ar-folly text-white text-[10px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1"
+                ></span>
+              </button>
+
+              <div
+                id="notification-bell-panel"
+                class="hidden absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-white text-ar-oxford rounded-lg shadow-xl border border-gray-100 z-50"
+              >
+                <div class="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+                  <p class="text-sm font-bold">Notificaciones</p>
+                  <button type="button" id="notification-mark-all" class="cursor-pointer text-xs text-ar-cerulean hover:underline">
+                    Marcar todas como leídas
+                  </button>
+                </div>
+                <div id="notification-bell-list"></div>
+              </div>
+            </div>
+          )}
+
           {user && <a href="/perfil">Perfil</a>}
           {user?.role === 'ADMIN' && <a href="/admin">Administración</a>}
 
@@ -88,6 +121,20 @@ const ogImage = image ? new URL(image, SITE_URL).toString() : undefined;
       <footer class="text-center text-sm text-ar-oxford-disabled py-6">
         &copy; {new Date().getFullYear()} Atlixbus
       </footer>
+    )}
+
+    {user && (
+      <script>
+        import { initNotificationBell } from '../lib/client/notificationBell.js';
+
+        initNotificationBell({
+          buttonEl: document.getElementById('notification-bell-btn'),
+          panelEl: document.getElementById('notification-bell-panel'),
+          listEl: document.getElementById('notification-bell-list'),
+          badgeEl: document.getElementById('notification-bell-badge'),
+          markAllBtn: document.getElementById('notification-mark-all'),
+        });
+      </script>
     )}
   </body>
 </html>

@@ -67,3 +67,16 @@ const favoritesJson = JSON.stringify(favorites);
   // Referencia disponible en consola para depuración manual si hace falta.
   window.__routesOverviewApp = app;
 </script>
+
+<script>
+  import { renderFavoritesGrid } from '../../lib/client/favoritesPage.js';
+
+  const root = document.getElementById('favorites-root');
+  const favorites = JSON.parse(root?.dataset.favorites ?? '[]');
+
+  renderFavoritesGrid({
+    favorites,
+    gridContainer: document.getElementById('favorites-grid'),
+    emptyContainer: document.getElementById('favorites-empty'),
+  });
+</script>

@@ -99,8 +99,16 @@ export function renderFavoritesGrid({
       const color = colorForGroupId(fav.routeGroupId);
       const thumbnail = buildThumbnailSvg(fav.points, color, fav.isLoop);
 
+      const alertBanner = fav.isManuallyLocked
+        ? `<div class="bg-ar-folly-disabled border-b border-ar-folly px-3 py-2">
+             <p class="text-xs font-bold text-ar-folly">⚠ Desvío de emergencia activo</p>
+             ${fav.manualLockReason ? `<p class="text-[11px] text-ar-oxford mt-0.5">${escapeHtml(fav.manualLockReason)}</p>` : ""}
+           </div>`
+        : "";
+
       return `
       <div class="favorite-card bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm" data-group-id="${fav.routeGroupId}">
+        ${alertBanner}
         <a href="/rutas?highlight=${fav.routeGroupId}" class="block bg-gray-50 h-32 flex items-center justify-center hover:bg-gray-100 transition-colors">
           ${thumbnail}
         </a>
