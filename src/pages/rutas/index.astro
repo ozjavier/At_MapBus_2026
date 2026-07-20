@@ -1,9 +1,15 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { listActiveRoutesForFinder } from '../../lib/publicRoutes.js';
+import { getFavoriteRouteIdsForUser } from '../../lib/routeFavorites.js';
 
 const routes = await listActiveRoutesForFinder();
 const routesJson = JSON.stringify(routes);
+
+const user = Astro.locals.user ?? null;
+const isLoggedIn = !!user;
+const favoriteIds = user ? await getFavoriteRouteIdsForUser(user.id) : [];
+const favoriteIdsJson = JSON.stringify(favoriteIds);
 ---
 
 <BaseLayout
@@ -54,7 +60,12 @@ const routesJson = JSON.stringify(routes);
           </p>
         </div>
 
-        <div id="routes-overview-root" data-routes={routesJson}>
+        <div
+          id="routes-overview-root"
+          data-routes={routesJson}
+          data-favorite-ids={favoriteIdsJson}
+          data-logged-in={isLoggedIn ? 'true' : 'false'}
+        >
           <div id="routes-list" class="space-y-2"></div>
 
           <p
@@ -83,9 +94,14 @@ const routesJson = JSON.stringify(routes);
 
 <script>
   import { RoutesOverviewMap } from '../../lib/client/routesOverviewMap.js';
+  import { initFavoriteStars } from '../../lib/client/routeFavorites.js';
 
   const root = document.getElementById('routes-overview-root');
   const routes = JSON.parse(root?.dataset.routes ?? '[]');
+  const favoriteIds = JSON.parse(root?.dataset.favoriteIds ?? '[]');
+  const isLoggedIn = root?.dataset.loggedIn === 'true';
+
+  initFavoriteStars({ isLoggedIn, loginRedirectPath: window.location.pathname });
 
   const app = new RoutesOverviewMap({
     mapContainer: document.getElementById('routes-map'),
@@ -93,6 +109,7 @@ const routesJson = JSON.stringify(routes);
     listContainer: document.getElementById('routes-list'),
     mapErrorContainer: document.getElementById('map-error'),
     emptyStateContainer: document.getElementById('routes-empty'),
+    favoriteIds,
   });
 
   // Referencia disponible en consola para depuración manual si hace falta.

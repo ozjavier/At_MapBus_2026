@@ -1,9 +1,15 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { listActiveRoutesForFinder } from '../lib/publicRoutes.js';
+import { getFavoriteRouteIdsForUser } from '../lib/routeFavorites.js';
 
 const routes = await listActiveRoutesForFinder();
 const routesJson = JSON.stringify(routes);
+
+const user = Astro.locals.user ?? null;
+const isLoggedIn = !!user;
+const favoriteIds = user ? await getFavoriteRouteIdsForUser(user.id) : [];
+const favoriteIdsJson = JSON.stringify(favoriteIds);
 ---
 
 <BaseLayout title="Encontrar mi ruta">
@@ -16,7 +22,13 @@ const routesJson = JSON.stringify(routes);
         en el mapa.
       </p>
 
-      <div id="route-finder-root" data-routes={routesJson} class="space-y-4">
+      <div
+        id="route-finder-root"
+        data-routes={routesJson}
+        data-favorite-ids={favoriteIdsJson}
+        data-logged-in={isLoggedIn ? 'true' : 'false'}
+        class="space-y-4"
+      >
         <!-- Punto de partida -->
         <div class="space-y-2">
           <label class="block text-sm font-medium text-gray-700" for="start-input">
@@ -129,9 +141,14 @@ const routesJson = JSON.stringify(routes);
 
 <script>
   import { RouteFinderApp } from '../lib/client/routeFinder.js';
+  import { initFavoriteStars } from '../lib/client/routeFavorites.js';
 
   const root = document.getElementById('route-finder-root');
   const routes = JSON.parse(root.dataset.routes ?? '[]');
+  const favoriteIds = JSON.parse(root.dataset.favoriteIds ?? '[]');
+  const isLoggedIn = root.dataset.loggedIn === 'true';
+
+  initFavoriteStars({ isLoggedIn, loginRedirectPath: window.location.pathname });
 
   const app = new RouteFinderApp({
     mapContainer: document.getElementById('finder-map'),
@@ -148,6 +165,7 @@ const routesJson = JSON.stringify(routes);
     resultsContainer: document.getElementById('route-results'),
     statusContainer: document.getElementById('finder-status'),
     mapErrorContainer: document.getElementById('map-error'),
+    favoriteIds,
   });
 
   // Referencia disponible en consola para depuración manual si hace falta.

@@ -1,6 +1,9 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getEventPageBySlug, listEventPageRoutes } from '../../lib/eventPages.js';
+import { getRoutesWithPointsByIds } from '../../lib/publicRoutes.js';
+import { buildTableOfContents } from '../../lib/toc.js';
+import { SITE_URL, SITE_NAME } from '../../lib/site.js';
 
 const slug = Astro.params.slug as string;
 const event = await getEventPageBySlug(slug);
@@ -9,30 +12,94 @@ if (!event) {
   return new Response('Pagina no encontrada', { status: 404 });
 }
 
-const routes = await listEventPageRoutes(event.id);
+const eventRoutes = await listEventPageRoutes(event.id);
+const routesWithPoints = await getRoutesWithPointsByIds(eventRoutes.map((r) => r.route_group_id));
+const pointsByGroupId = new Map(routesWithPoints.map((r) => [r.groupId, r]));
 
-const SITE_URL = import.meta.env.SITE_URL || 'https://atlixbus.mx';
+// Combina el directorio curado por el admin (orden + instrucciones) con los
+// puntos reales de la plantilla activa de cada ruta, para poder listar y
+// dibujar en un solo paso. Si una ruta no tiene plantilla con puntos, se
+// deja en la lista mas no se dibuja (misma convencion que /ruta).
+const combinedRoutes = eventRoutes.map((r) => {
+  const withPoints = pointsByGroupId.get(r.route_group_id);
+  return {
+    groupId: r.route_group_id,
+    routeNumber: r.route_number,
+    name: r.name,
+    customInstructions: r.custom_instructions,
+    isLoop: withPoints?.isLoop ?? false,
+    points: withPoints?.points ?? [],
+  };
+});
+
+const { html: contentHtmlWithIds, toc } = buildTableOfContents(event.content_html);
+
 const canonicalPath = `/eventos/${event.slug}`;
-const description = event.meta_description || undefined;
+
+// Meta description automatica a partir del contenido si el admin no
+// escribio una manualmente — evita paginas sin description en buscadores.
+const plainText = (event.content_html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+const autoDescription = plainText.length > 160 ? `${plainText.slice(0, 157).trimEnd()}...` : plainText;
+const description = event.meta_description || autoDescription || undefined;
+
+const formattedDate = event.event_date
+  ? new Date(event.event_date).toLocaleDateString('es-MX', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    })
+  : null;
+
+const latitude = event.latitude != null ? Number(event.latitude) : null;
+const longitude = event.longitude != null ? Number(event.longitude) : null;
+const hasVenueCoords = latitude != null && longitude != null && !Number.isNaN(latitude) && !Number.isNaN(longitude);
 
 const jsonLd = {
   '@context': 'https://schema.org',
   '@type': 'Event',
   name: event.title,
+  description,
   startDate: event.event_date ?? undefined,
+  eventStatus: 'https://schema.org/EventScheduledStatus',
+  eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+  image: event.cover_image_url ? new URL(event.cover_image_url, SITE_URL).toString() : undefined,
+  url: new URL(canonicalPath, SITE_URL).toString(),
+  organizer: { '@type': 'Organization', name: SITE_NAME, url: SITE_URL },
   location: event.place_name
     ? {
         '@type': 'Place',
         name: event.place_name,
         address: event.address ?? undefined,
-        geo: event.latitude && event.longitude
-          ? { '@type': 'GeoCoordinates', latitude: event.latitude, longitude: event.longitude }
+        geo: hasVenueCoords
+          ? { '@type': 'GeoCoordinates', latitude, longitude }
           : undefined,
       }
     : undefined,
-  image: event.cover_image_url ? new URL(event.cover_image_url, SITE_URL).toString() : undefined,
-  description,
 };
+
+const breadcrumbLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: 'Inicio', item: SITE_URL },
+    { '@type': 'ListItem', position: 2, name: 'Eventos', item: new URL('/eventos', SITE_URL).toString() },
+    { '@type': 'ListItem', position: 3, name: event.title, item: new URL(canonicalPath, SITE_URL).toString() },
+  ],
+};
+
+const keywords = [event.place_name, ...combinedRoutes.map((r) => `Ruta ${r.routeNumber}`)]
+  .filter(Boolean)
+  .join(', ');
+
+const routesJson = JSON.stringify(combinedRoutes);
+const venueJson = hasVenueCoords
+  ? JSON.stringify({ lat: latitude, lng: longitude, name: event.place_name, address: event.address })
+  : null;
+
+// Misma paleta que usa el mapa de "Rutas relacionadas" del blog, para que
+// el punto de color en la lista coincida con la linea en el mapa.
+const MAP_COLORS = ['#007991', '#F9A03F', '#EF476F', '#118AB2', '#06A77D', '#7B2CBF'];
 ---
 
 <BaseLayout
@@ -42,41 +109,624 @@ const jsonLd = {
   canonicalPath={canonicalPath}
 >
   <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} slot="head" />
+  <script type="application/ld+json" set:html={JSON.stringify(breadcrumbLd)} slot="head" />
+  {keywords && <meta name="keywords" content={keywords} slot="head" />}
 
-  <div class="max-w-3xl mx-auto">
-    <h1 class="text-3xl font-bold text-ar-oxford mb-1">{event.title}</h1>
-    {event.place_name && <p class="text-ar-oxford-disabled mb-1">{event.place_name}</p>}
-    {event.event_date && (
-      <p class="text-sm text-ar-oxford-disabled mb-6">
-        {new Date(event.event_date).toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
-      </p>
+  <!-- Breadcrumb -->
+  <nav aria-label="Breadcrumb" class="text-sm text-ar-oxford-disabled mb-6 max-w-7xl mx-auto">
+    <a href="/eventos" class="hover:text-ar-cerulean hover:underline transition-colors">Eventos</a>
+    <span class="mx-1.5">/</span>
+    <span class="text-ar-oxford font-medium">{event.title}</span>
+  </nav>
+
+  <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8 items-start">
+    <!-- Tabla de contenidos (desktop, sticky) -->
+    {toc.length > 0 && (
+      <aside class="hidden lg:block">
+        <div class="sticky top-6 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+          <p class="text-xs font-bold uppercase tracking-wide text-ar-oxford-disabled mb-3">
+            En este evento
+          </p>
+          <nav>
+            <ul class="space-y-1 text-sm border-l-2 border-gray-100">
+              {toc.map((item) => (
+                <li>
+                  <a
+                    href={`#${item.id}`}
+                    data-toc-id={item.id}
+                    class={`toc-link block leading-snug py-1 -ml-0.5 pl-4 border-l-2 border-transparent text-ar-oxford-disabled hover:text-ar-cerulean transition-colors ${
+                      item.level === 3 ? 'pl-7' : item.level === 4 ? 'pl-10 text-xs' : ''
+                    }`}
+                  >
+                    {item.text}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          {combinedRoutes.length > 0 && (
+            <a
+              href="#como-llegar"
+              class="mt-4 flex items-center gap-1.5 text-sm font-semibold text-ar-cerulean hover:underline"
+            >
+              Cómo llegar &darr;
+            </a>
+          )}
+        </div>
+      </aside>
     )}
 
-    {event.cover_image_url && (
-      <img src={event.cover_image_url} alt={event.title} class="w-full rounded-lg mb-6" />
-    )}
+    <!-- Evento -->
+    <article class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 sm:p-10 min-w-0">
+      <header class="mb-8">
+        {event.place_name && (
+          <div class="flex flex-wrap gap-2 mb-4">
+            <span class="px-2.5 py-1 bg-ar-saffron/20 text-ar-oxford text-xs font-semibold rounded-full">
+              {event.place_name}
+            </span>
+          </div>
+        )}
 
-    <div class="prose max-w-none prose-headings:text-ar-oxford" set:html={event.content_html} />
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-ar-oxford leading-tight mb-3 tracking-tight">
+          {event.title}
+        </h1>
 
-    {routes.length > 0 && (
-      <div class="mt-10 pt-6 border-t border-gray-200">
-        <h2 class="text-xl font-bold text-ar-oxford mb-4">Cómo llegar</h2>
-        <div class="flex flex-col gap-3">
-          {routes.map((r) => (
-            <div class="bg-white rounded-lg shadow-sm p-4 flex gap-4">
-              <span class="shrink-0 w-10 h-10 rounded-full bg-ar-cerulean text-white flex items-center justify-center font-bold text-sm">
-                {r.route_number}
+        <div class="flex flex-wrap items-center gap-3 text-sm text-ar-oxford-disabled border-t border-b border-gray-100 py-3">
+          {formattedDate && (
+            <span class="flex items-center gap-1.5">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                <path d="M16 2v4M8 2v4M3 10h18"></path>
+              </svg>
+              <time datetime={new Date(event.event_date).toISOString()} class="capitalize">{formattedDate}</time>
+            </span>
+          )}
+          {event.address && (
+            <>
+              <span class="text-gray-300">&bull;</span>
+              <span class="flex items-center gap-1.5">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+                  <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+                {event.address}
               </span>
-              <div>
-                <p class="font-semibold text-ar-oxford">Ruta {r.route_number} {r.name ? `— ${r.name}` : ''}</p>
-                {r.custom_instructions && (
-                  <p class="text-sm text-ar-oxford-disabled mt-1">{r.custom_instructions}</p>
-                )}
-              </div>
-            </div>
-          ))}
+            </>
+          )}
+          {combinedRoutes.length > 0 && (
+            <>
+              <span class="hidden sm:inline text-gray-300">&bull;</span>
+              <a href="#como-llegar" class="flex items-center gap-1.5 font-semibold text-ar-cerulean hover:underline">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="6" width="18" height="10" rx="2"></rect>
+                  <circle cx="7.5" cy="18" r="1.5"></circle>
+                  <circle cx="16.5" cy="18" r="1.5"></circle>
+                  <path d="M3 11h18"></path>
+                </svg>
+                Cómo llegar
+              </a>
+            </>
+          )}
+        </div>
+      </header>
+
+      {event.cover_image_url && (
+        <img
+          src={event.cover_image_url}
+          alt={event.title}
+          class="w-full rounded-xl mb-10 shadow-sm object-cover max-h-[420px]"
+          loading="eager"
+        />
+      )}
+
+      <!-- Índice (mobile, colapsable) -->
+      {toc.length > 0 && (
+        <details class="lg:hidden mb-8 bg-gray-50 rounded-lg border border-gray-200 p-4">
+          <summary class="cursor-pointer font-semibold text-ar-oxford text-sm select-none">
+            Contenido del evento
+          </summary>
+          <ul class="mt-3 space-y-2 text-sm">
+            {toc.map((item) => (
+              <li class={item.level === 3 ? 'pl-3' : item.level === 4 ? 'pl-6' : ''}>
+                <a href={`#${item.id}`} data-toc-id={item.id} class="toc-link text-ar-cerulean hover:underline">
+                  {item.text}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <div
+        class="prose prose-lg max-w-none
+               prose-headings:text-ar-oxford prose-headings:font-bold prose-headings:tracking-tight prose-headings:scroll-mt-24
+               prose-h2:text-2xl prose-h2:mt-10 prose-h2:mb-4 prose-h2:pb-2 prose-h2:border-b prose-h2:border-gray-100
+               prose-h3:text-xl prose-h3:mt-8 prose-h3:mb-3
+               prose-p:text-ar-oxford prose-p:leading-relaxed
+               prose-a:text-ar-cerulean prose-a:font-medium prose-a:no-underline hover:prose-a:underline
+               prose-strong:text-ar-oxford
+               prose-blockquote:border-l-4 prose-blockquote:border-ar-cerulean prose-blockquote:bg-ar-cerulean-disabled/40 prose-blockquote:py-1 prose-blockquote:px-4 prose-blockquote:not-italic prose-blockquote:rounded-r-md
+               prose-img:rounded-lg prose-img:shadow-sm
+               prose-li:text-ar-oxford prose-li:marker:text-ar-cerulean
+               prose-code:text-ar-folly prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none"
+        set:html={contentHtmlWithIds}
+      />
+
+      <!-- Compartir -->
+      <div class="flex items-center gap-3 mt-10 pt-6 border-t border-gray-100">
+        <span class="text-sm font-semibold text-ar-oxford-disabled">Compartir:</span>
+        <a
+          href={`https://wa.me/?text=${encodeURIComponent(event.title)}%20${new URL(canonicalPath, SITE_URL).toString()}`}
+          target="_blank" rel="noopener" aria-label="Compartir en WhatsApp"
+          class="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-ar-oxford-disabled hover:border-ar-cerulean hover:text-ar-cerulean hover:bg-ar-cerulean-disabled/40 transition-colors"
+        >
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M17.6 6.3A8.9 8.9 0 0012 4a8.9 8.9 0 00-7.7 13.4L3 21l3.7-1.2A8.9 8.9 0 0012 21a8.9 8.9 0 006.3-15.7zM12 19.3a7.4 7.4 0 01-3.8-1l-.3-.2-2.5.8.8-2.4-.2-.3A7.4 7.4 0 1119.4 12 7.4 7.4 0 0112 19.3z" /></svg>
+        </a>
+        <a
+          href={`https://www.facebook.com/sharer/sharer.php?u=${new URL(canonicalPath, SITE_URL).toString()}`}
+          target="_blank" rel="noopener" aria-label="Compartir en Facebook"
+          class="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-ar-oxford-disabled hover:border-ar-cerulean hover:text-ar-cerulean hover:bg-ar-cerulean-disabled/40 transition-colors"
+        >
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M22 12a10 10 0 10-11.6 9.9v-7H7.9V12h2.5V9.8c0-2.5 1.5-3.9 3.8-3.9 1.1 0 2.2.2 2.2.2v2.5h-1.3c-1.2 0-1.6.8-1.6 1.6V12h2.8l-.4 2.9h-2.4v7A10 10 0 0022 12z" /></svg>
+        </a>
+        <a
+          href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(event.title)}&url=${new URL(canonicalPath, SITE_URL).toString()}`}
+          target="_blank" rel="noopener" aria-label="Compartir en X"
+          class="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-ar-oxford-disabled hover:border-ar-cerulean hover:text-ar-cerulean hover:bg-ar-cerulean-disabled/40 transition-colors"
+        >
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M18.9 2H22l-7.6 8.7L23 22h-6.9l-5.4-6.7L4.4 22H1.3l8.1-9.3L1 2h7l4.9 6.1L18.9 2zm-1.2 18h1.9L7.4 4H5.4l12.3 16z" /></svg>
+        </a>
+        <button
+          type="button"
+          id="copy-link-btn"
+          aria-label="Copiar enlace"
+          data-url={new URL(canonicalPath, SITE_URL).toString()}
+          class="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-ar-oxford-disabled hover:border-ar-cerulean hover:text-ar-cerulean hover:bg-ar-cerulean-disabled/40 transition-colors"
+        >
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.07 0l1.94-1.94a5 5 0 00-7.07-7.07L10.5 5.5M14 11a5 5 0 00-7.07 0L4.99 12.94a5 5 0 007.07 7.07L13.5 18.5" /></svg>
+        </button>
+      </div>
+
+      <div class="mt-6 pt-6 border-t border-gray-100">
+        <a href="/eventos" class="inline-flex items-center gap-1.5 text-sm font-semibold text-ar-cerulean hover:underline">
+          &larr; Ver todos los eventos
+        </a>
+      </div>
+    </article>
+  </div>
+
+  <!-- Cómo llegar: mapa + lista de rutas -->
+  {combinedRoutes.length > 0 && (
+    <section id="como-llegar" class="max-w-7xl mx-auto mt-14 pt-10 border-t border-gray-200 scroll-mt-24">
+      <div class="mb-6 max-w-3xl flex items-start justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-ar-oxford mb-1">Cómo llegar</h2>
+          <p class="text-ar-oxford-disabled">
+            Estas son las rutas de Atlixbus que te acercan a {event.title}
+            {event.place_name ? ` en ${event.place_name}` : ''}. Selecciona una para verla en el mapa junto con el punto del evento.
+          </p>
+        </div>
+        <span class="hidden sm:inline-flex shrink-0 items-center px-2.5 py-1 rounded-full bg-ar-cerulean-disabled/40 text-ar-cerulean text-xs font-semibold">
+          {combinedRoutes.length} {combinedRoutes.length === 1 ? 'ruta' : 'rutas'}
+        </span>
+      </div>
+
+      <div
+        id="event-routes-root"
+        data-routes={routesJson}
+        data-venue={venueJson}
+        class="event-routes-grid grid grid-cols-1 lg:grid-cols-[minmax(0,320px)_1fr] gap-4 bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100"
+      >
+        <!-- Lista -->
+        <div id="event-routes-sidebar" class="p-4 lg:border-r border-gray-100 max-h-[420px] lg:max-h-[480px] overflow-y-auto">
+          <ul id="event-routes-list" class="space-y-2">
+            {combinedRoutes.map((r, i) => {
+              const hasPoints = r.points.length > 0;
+              return (
+                <li>
+                  <button
+                    type="button"
+                    data-route-index={i}
+                    disabled={!hasPoints}
+                    class={`event-route-item w-full text-left px-3 py-2.5 rounded-lg border transition-all flex items-start gap-2.5 ${
+                      hasPoints
+                        ? 'border-gray-200 hover:border-ar-cerulean hover:bg-ar-cerulean-disabled/40 hover:translate-x-0.5 cursor-pointer'
+                        : 'border-gray-100 opacity-50 cursor-not-allowed'
+                    }`}
+                  >
+                    <span
+                      class="w-2.5 h-2.5 rounded-full shrink-0 ring-2 ring-white shadow mt-1"
+                      style={`background-color:${MAP_COLORS[i % MAP_COLORS.length]}`}
+                    ></span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block font-semibold text-ar-oxford text-sm truncate">
+                        Ruta {r.routeNumber} {r.name ? `— ${r.name}` : ''}
+                      </span>
+                      {r.customInstructions && (
+                        <span class="block text-xs text-ar-oxford-disabled mt-0.5 leading-snug">
+                          {r.customInstructions}
+                        </span>
+                      )}
+                      {!hasPoints && (
+                        <span class="block text-xs text-ar-oxford-disabled mt-0.5 italic">
+                          Trazado no disponible todavía
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div class="flex items-center justify-between mt-4">
+            <button
+              type="button"
+              id="event-routes-reset"
+              class="text-sm font-semibold text-ar-oxford-disabled hover:text-ar-cerulean transition-colors"
+            >
+              Ver todas
+            </button>
+            <a href="/" class="inline-flex items-center gap-1.5 text-sm font-semibold text-ar-cerulean hover:underline">
+              Buscar mi viaje &rarr;
+            </a>
+          </div>
+        </div>
+
+        <!-- Mapa -->
+        <div class="relative">
+          <div id="event-routes-map" class="w-full h-[320px] lg:h-[480px] bg-gray-50"></div>
+
+          <div id="event-map-loading" class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gray-50 text-ar-oxford-disabled text-sm">
+            <svg class="animate-spin" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" opacity="0.25"></circle>
+              <path d="M12 2a10 10 0 010 20" stroke-linecap="round"></path>
+            </svg>
+            Cargando mapa...
+          </div>
+
+          <button
+            type="button"
+            id="event-map-fullscreen-btn"
+            title="Ver mapa en pantalla completa"
+            class="absolute top-3 right-3 z-[500] bg-white shadow-md rounded-md p-2 hover:bg-gray-50 transition-colors"
+          >
+            <svg id="event-expand-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+            </svg>
+            <svg id="event-collapse-icon" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3v3a2 2 0 0 1-2 2H3M16 3v3a2 2 0 0 0 2 2h3M21 16h-3a2 2 0 0 0-2 2v3M3 16h3a2 2 0 0 1 2 2v3"></path>
+            </svg>
+          </button>
+
+          <p id="event-map-error" class="hidden absolute top-3 left-3 right-16 text-xs text-ar-folly bg-white px-3 py-2 rounded-md shadow">
+            No se pudo iniciar el mapa. Revisa la consola del navegador (F12).
+          </p>
         </div>
       </div>
-    )}
-  </div>
+
+      <p class="text-xs text-ar-oxford-disabled mt-3">
+        Los puntos muestran las paradas de cada ruta y las flechas el sentido de circulación. El marcador rojo señala la ubicación del evento.
+      </p>
+    </section>
+  )}
+
+<style>
+  .event-routes-grid.is-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: white;
+    border-radius: 0;
+    padding: 1rem;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 1rem;
+    overflow: hidden;
+  }
+
+  @media (max-width: 1023px) {
+    .event-routes-grid.is-fullscreen {
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(0, 40%) 1fr;
+    }
+  }
+
+  .event-routes-grid.is-fullscreen #event-routes-sidebar {
+    max-height: 100%;
+    border-right: 1px solid #f3f4f6;
+  }
+
+  .event-routes-grid.is-fullscreen #event-routes-map {
+    height: 100% !important;
+  }
+</style>
 </BaseLayout>
+
+<script>
+  const tocLinks = Array.from(document.querySelectorAll('.toc-link'));
+
+  if (tocLinks.length > 0) {
+    const headingEls = tocLinks
+      .map((link) => document.getElementById(link.dataset.tocId))
+      .filter(Boolean);
+
+    const setActive = (id) => {
+      tocLinks.forEach((link) => {
+        const isActive = link.dataset.tocId === id;
+        link.classList.toggle('text-ar-cerulean', isActive);
+        link.classList.toggle('border-ar-cerulean', isActive);
+        link.classList.toggle('font-semibold', isActive);
+        link.classList.toggle('text-ar-oxford-disabled', !isActive);
+      });
+    };
+
+    if (headingEls[0]) setActive(headingEls[0].id);
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting);
+        if (visible.length === 0) return;
+
+        const topMost = visible.reduce((a, b) =>
+          a.boundingClientRect.top < b.boundingClientRect.top ? a : b,
+        );
+        setActive(topMost.target.id);
+      },
+      {
+        rootMargin: '-15% 0px -70% 0px',
+        threshold: 0,
+      },
+    );
+
+    headingEls.forEach((el) => observer.observe(el));
+  }
+
+  // Copiar enlace
+  const copyBtn = document.getElementById('copy-link-btn');
+  copyBtn?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(copyBtn.dataset.url || window.location.href);
+      const original = copyBtn.innerHTML;
+      copyBtn.innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>';
+      setTimeout(() => { copyBtn.innerHTML = original; }, 1500);
+    } catch (err) {
+      console.error('No se pudo copiar el enlace:', err);
+    }
+  });
+</script>
+
+<script>
+  import L from 'leaflet';
+  import 'leaflet/dist/leaflet.css';
+
+  const ATLIXCO_CENTER = [18.9099148, -98.4368282];
+  const COLORS = ['#007991', '#F9A03F', '#EF476F', '#118AB2', '#06A77D', '#7B2CBF'];
+  const VENUE_COLOR = '#EF476F';
+  const STOP_RADIUS = { normal: 5, terminal: 8 };
+  const ARROW_STEP_THRESHOLD = 10;
+
+  // Rumbo (0-360°, 0 = norte, sentido horario) entre dos puntos lat/lng.
+  function bearingDegrees(a, b) {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x =
+      Math.cos(lat1) * Math.sin(lat2) -
+      Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    const deg = (Math.atan2(y, x) * 180) / Math.PI;
+    return (deg + 360) % 360;
+  }
+
+  // Ícono de flecha (chevron) rotado según el rumbo del tramo.
+  function buildArrowIcon(color, angleDeg) {
+    return L.divIcon({
+      className: '',
+      html: `<div style="width:16px;height:16px;transform:rotate(${angleDeg}deg);transform-origin:50% 50%;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))">
+        <svg width="16" height="16" viewBox="0 0 24 24">
+          <path d="M12 3 L19.5 19 L12 14.5 L4.5 19 Z" fill="${color}" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round" />
+        </svg>
+      </div>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+  }
+
+  // Flechas <> a lo largo del trazado que muestran hacia dónde avanza la
+  // ruta. En trazados largos se muestra una de cada dos para no saturar.
+  function buildDirectionArrows(orderedPoints, color) {
+    const step = orderedPoints.length > ARROW_STEP_THRESHOLD ? 2 : 1;
+    const markers = [];
+    for (let i = 0; i < orderedPoints.length - 1; i += step) {
+      const a = orderedPoints[i];
+      const b = orderedPoints[i + 1];
+      const mid = { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+      const angle = bearingDegrees(a, b);
+      markers.push(
+        L.marker([mid.lat, mid.lng], {
+          icon: buildArrowIcon(color, angle),
+          interactive: false,
+          keyboard: false,
+        }),
+      );
+    }
+    return markers;
+  }
+
+  // Círculo de parada: sólido y pequeño para paradas normales; anillo hueco
+  // y un poco más grande para el punto de inicio.
+  function buildStopMarker(point, color, { isTerminal, label }) {
+    const marker = L.circleMarker([point.lat, point.lng], {
+      radius: isTerminal ? STOP_RADIUS.terminal : STOP_RADIUS.normal,
+      weight: isTerminal ? 3 : 2,
+      color: isTerminal ? color : '#ffffff',
+      fillColor: isTerminal ? '#ffffff' : color,
+      fillOpacity: 0.9,
+      opacity: 0.9,
+    });
+    if (label) marker.bindTooltip(label, { direction: 'top', offset: [0, -6] });
+    return marker;
+  }
+
+  // Pin tipo "gota" para marcar la sede del evento — mismo lenguaje visual
+  // que los marcadores de origen/destino del buscador de rutas, pero con
+  // forma de pin para diferenciarlo claramente de una parada de camión.
+  function buildVenueIcon(color) {
+    return L.divIcon({
+      className: '',
+      html: `<div style="filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))">
+        <svg width="30" height="38" viewBox="0 0 30 38">
+          <path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 23 15 23s15-12.5 15-23C30 6.7 23.3 0 15 0z" fill="${color}" stroke="#ffffff" stroke-width="1.5" />
+          <circle cx="15" cy="15" r="6" fill="#ffffff" />
+        </svg>
+      </div>`,
+      iconSize: [30, 38],
+      iconAnchor: [15, 38],
+      popupAnchor: [0, -34],
+    });
+  }
+
+  const root = document.getElementById('event-routes-root');
+  const mapEl = document.getElementById('event-routes-map');
+  const errorEl = document.getElementById('event-map-error');
+  const loadingEl = document.getElementById('event-map-loading');
+
+  if (root && mapEl) {
+    try {
+      const routes = JSON.parse(root.dataset.routes || '[]');
+      const venue = root.dataset.venue ? JSON.parse(root.dataset.venue) : null;
+
+      delete L.Icon.Default.prototype._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+      });
+
+      const map = L.map(mapEl).setView(ATLIXCO_CENTER, 14);
+      const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      }).addTo(map);
+
+      // Oculta el estado de carga en cuanto los tiles terminan de pintarse
+      tileLayer.once('load', () => loadingEl?.classList.add('hidden'));
+      // Respaldo por si el evento 'load' no dispara (tiles cacheados, etc.)
+      setTimeout(() => loadingEl?.classList.add('hidden'), 1200);
+
+      // --- Marcador de la sede del evento ---
+      let venueMarker = null;
+      if (venue && venue.lat != null && venue.lng != null) {
+        venueMarker = L.marker([venue.lat, venue.lng], {
+          icon: buildVenueIcon(VENUE_COLOR),
+          zIndexOffset: 1000,
+        }).addTo(map);
+        const label = venue.name
+          ? `<strong>${venue.name}</strong>${venue.address ? `<br>${venue.address}` : ''}`
+          : 'Ubicación del evento';
+        venueMarker.bindPopup(label);
+      }
+
+      const routeLayers = routes.map((route, i) => {
+        const points = Array.isArray(route.points) ? route.points : [];
+        if (points.length === 0) return null;
+
+        const routePoints = route.isLoop ? [...points, points[0]] : points;
+        const latlngs = routePoints.map((p) => [p.lat, p.lng]);
+        const color = COLORS[i % COLORS.length];
+
+        const line = L.polyline(latlngs, { color, weight: 4, opacity: 0.85 }).addTo(map);
+        line.bindPopup(`<strong>Ruta ${route.routeNumber}</strong>${route.name ? ` — ${route.name}` : ''}`);
+
+        // --- Flechas de sentido a lo largo del trazado ---
+        const arrowMarkers = buildDirectionArrows(routePoints, color);
+        arrowMarkers.forEach((m) => m.addTo(map));
+
+        // --- Paradas (círculos): solo los puntos que no son "solo trazado" ---
+        const boardablePoints = points.filter((p) => !p.skipStop);
+        const stopMarkers = boardablePoints.map((point, stopIndex) => {
+          const isTerminal = stopIndex === 0 && !route.isLoop;
+          const marker = buildStopMarker(point, color, {
+            isTerminal,
+            label: isTerminal
+              ? `Ruta ${route.routeNumber} — inicio de ruta`
+              : `Ruta ${route.routeNumber} — parada ${stopIndex + 1}`,
+          });
+          marker.addTo(map);
+          return marker;
+        });
+
+        return { line, arrowMarkers, stopMarkers };
+      });
+
+      const validLayers = routeLayers.filter(Boolean);
+
+      const fitAll = () => {
+        const boundsPoints = [];
+        validLayers.forEach((l) => boundsPoints.push(...l.line.getLatLngs()));
+        if (venueMarker) boundsPoints.push(venueMarker.getLatLng());
+        if (boundsPoints.length === 0) return;
+        map.fitBounds(L.latLngBounds(boundsPoints), { padding: [30, 30] });
+      };
+      fitAll();
+
+      document.querySelectorAll('.event-route-item').forEach((btn) => {
+        if (btn.disabled) return;
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.dataset.routeIndex);
+          const layer = routeLayers[idx];
+          if (!layer) return;
+
+          document.querySelectorAll('.event-route-item').forEach((b) =>
+            b.classList.remove('border-ar-cerulean', 'bg-ar-cerulean-disabled/40'),
+          );
+          btn.classList.add('border-ar-cerulean', 'bg-ar-cerulean-disabled/40');
+
+          const bounds = layer.line.getBounds();
+          if (venueMarker) bounds.extend(venueMarker.getLatLng());
+          map.fitBounds(bounds, { padding: [40, 40] });
+          layer.line.openPopup(layer.line.getBounds().getCenter());
+        });
+      });
+
+      document.getElementById('event-routes-reset')?.addEventListener('click', () => {
+        document.querySelectorAll('.event-route-item').forEach((b) =>
+          b.classList.remove('border-ar-cerulean', 'bg-ar-cerulean-disabled/40'),
+        );
+        fitAll();
+      });
+
+      // --- Pantalla completa (mantiene el sidebar visible) ---
+      const gridRoot = document.getElementById('event-routes-root');
+      const fullscreenBtn = document.getElementById('event-map-fullscreen-btn');
+      const expandIcon = document.getElementById('event-expand-icon');
+      const collapseIcon = document.getElementById('event-collapse-icon');
+
+      const setFullscreen = (isFullscreen) => {
+        gridRoot?.classList.toggle('is-fullscreen', isFullscreen);
+        expandIcon?.classList.toggle('hidden', isFullscreen);
+        collapseIcon?.classList.toggle('hidden', !isFullscreen);
+        fullscreenBtn?.setAttribute('title', isFullscreen ? 'Salir de pantalla completa' : 'Ver mapa en pantalla completa');
+        document.body.style.overflow = isFullscreen ? 'hidden' : '';
+        setTimeout(() => map.invalidateSize(), 150);
+      };
+
+      fullscreenBtn?.addEventListener('click', () => {
+        setFullscreen(!gridRoot?.classList.contains('is-fullscreen'));
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && gridRoot?.classList.contains('is-fullscreen')) {
+          setFullscreen(false);
+        }
+      });
+
+      setTimeout(() => map.invalidateSize(), 200);
+    } catch (err) {
+      console.error('Error al iniciar el mapa del evento:', err);
+      errorEl?.classList.remove('hidden');
+      loadingEl?.classList.add('hidden');
+    }
+  }
+</script>

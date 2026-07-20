@@ -1,5 +1,6 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { renderFavoriteStarHtml } from "./routeFavorites.js";
 
 const ATLIXCO_CENTER = [18.9099148, -98.4368282];
 const DEFAULT_ZOOM = 14;
@@ -36,6 +37,7 @@ export class RoutesOverviewMap {
    * @param {HTMLElement} opts.listContainer
    * @param {HTMLElement} [opts.mapErrorContainer]
    * @param {HTMLElement} [opts.emptyStateContainer]
+   * @param {Array<string>} [opts.favoriteIds] - route_group_id del usuario logueado
    */
   constructor({
     mapContainer,
@@ -43,11 +45,13 @@ export class RoutesOverviewMap {
     listContainer,
     mapErrorContainer,
     emptyStateContainer,
+    favoriteIds,
   }) {
     this.routes = Array.isArray(routes) ? routes : [];
     this.listContainer = listContainer;
     this.mapErrorContainer = mapErrorContainer;
     this.emptyStateContainer = emptyStateContainer;
+    this.favoriteIds = new Set(favoriteIds ?? []);
 
     // groupId -> { color, route, polyline, stopMarkers: L.CircleMarker[], arrowMarkers: L.Marker[] }
     this.lines = new Map();
@@ -238,37 +242,49 @@ export class RoutesOverviewMap {
       const stopCount = Array.isArray(route.points)
         ? route.points.filter((p) => !p.skipStop).length
         : 0;
+      const isFavorite = this.favoriteIds.has(route.groupId);
 
-      const item = document.createElement("button");
-      item.type = "button";
-      item.dataset.groupId = route.groupId;
-      item.disabled = !hasLine;
-      item.className = [
-        "route-list-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all text-left",
+      // Nota: ya no es un solo <button> — un botón de "seleccionar" y el
+      // botón de estrella van como hermanos, no anidados (un <button>
+      // dentro de otro <button> es HTML inválido y rompe el click de la
+      // estrella).
+      const wrapper = document.createElement("div");
+      wrapper.dataset.groupId = route.groupId;
+      wrapper.className = [
+        "route-list-item flex items-center gap-1 rounded-lg border transition-all",
         hasLine
-          ? "cursor-pointer border-gray-200 hover:bg-gray-50 hover:border-gray-300"
-          : "cursor-not-allowed border-gray-100 opacity-50",
+          ? "border-gray-200 hover:bg-gray-50 hover:border-gray-300"
+          : "border-gray-100 opacity-50",
       ].join(" ");
 
-      item.innerHTML = `
-        <span
-          class="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-xs ring-2 ring-white shadow"
-          style="background:${color}"
-        >${escapeHtml(shortLabel(route.routeNumber))}</span>
-        <span class="flex-1 min-w-0">
-          <span class="block font-semibold text-ar-oxford truncate">Ruta ${escapeHtml(String(route.routeNumber))}</span>
-          <span class="flex items-center gap-1.5 text-xs text-ar-oxford-disabled truncate">
-            ${route.name ? `<span class="truncate">${escapeHtml(route.name)}</span><span>&middot;</span>` : ""}
-            <span class="whitespace-nowrap">${stopCount} parada${stopCount === 1 ? "" : "s"}</span>
+      wrapper.innerHTML = `
+        <button
+          type="button"
+          ${hasLine ? "" : "disabled"}
+          class="route-select-btn flex-1 min-w-0 flex items-center gap-3 px-3 py-2.5 text-left ${hasLine ? "cursor-pointer" : "cursor-not-allowed"}"
+        >
+          <span
+            class="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-xs ring-2 ring-white shadow"
+            style="background:${color}"
+          >${escapeHtml(shortLabel(route.routeNumber))}</span>
+          <span class="flex-1 min-w-0">
+            <span class="block font-semibold text-ar-oxford truncate">Ruta ${escapeHtml(String(route.routeNumber))}</span>
+            <span class="flex items-center gap-1.5 text-xs text-ar-oxford-disabled truncate">
+              ${route.name ? `<span class="truncate">${escapeHtml(route.name)}</span><span>&middot;</span>` : ""}
+              <span class="whitespace-nowrap">${stopCount} parada${stopCount === 1 ? "" : "s"}</span>
+            </span>
           </span>
-        </span>
-        ${route.farePrice != null ? `<span class="shrink-0 text-xs font-semibold text-ar-oxford-disabled">$${route.farePrice}</span>` : ""}
+          ${route.farePrice != null ? `<span class="shrink-0 text-xs font-semibold text-ar-oxford-disabled">$${route.farePrice}</span>` : ""}
+        </button>
+        <span class="shrink-0 pr-2">${renderFavoriteStarHtml(route.groupId, isFavorite)}</span>
       `;
 
       if (hasLine) {
-        item.addEventListener("click", () => this.selectRoute(route.groupId));
+        wrapper
+          .querySelector(".route-select-btn")
+          .addEventListener("click", () => this.selectRoute(route.groupId));
       }
-      this.listContainer.appendChild(item);
+      this.listContainer.appendChild(wrapper);
     });
   }
 
@@ -286,7 +302,6 @@ export class RoutesOverviewMap {
   }
 
   selectRoute(groupId) {
-    // Tocar la misma ruta otra vez limpia la selección.
     if (this.selectedId === groupId) {
       this.clearSelection();
       return;
@@ -304,6 +319,7 @@ export class RoutesOverviewMap {
       stopMarkers.forEach((marker) => {
         marker.options._dimmed = !isSelected;
         marker.setStyle({ opacity, fillOpacity: opacity });
+        if (isSelected) marker.bringToFront(); // <-- evita que la línea los tape
       });
       arrowMarkers.forEach((marker) => marker.setOpacity(opacity));
     });

@@ -3,13 +3,14 @@ import BaseLayout from './BaseLayout.astro';
 
 interface Props {
   title: string;
-  active: 'cuenta' | 'plan' | 'notificaciones' | 'recibos';
+  active: 'cuenta' | 'favoritos' | 'plan' | 'notificaciones' | 'recibos';
 }
 
 const { title, active } = Astro.props;
 
 const navItems = [
   { key: 'cuenta', href: '/perfil', label: 'Mi Cuenta' },
+  { key: 'favoritos', href: '/perfil/favoritos', label: 'Favoritos' },
   { key: 'plan', href: '/perfil/plan', label: 'Plan' },
   { key: 'notificaciones', href: '/perfil/notificaciones', label: 'Notificaciones' },
   { key: 'recibos', href: '/perfil/recibos', label: 'Recibos' },

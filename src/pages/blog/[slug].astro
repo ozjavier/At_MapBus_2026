@@ -482,6 +482,75 @@ const shareText = encodeURIComponent(article.title);
 
   const ATLIXCO_CENTER = [18.9099148, -98.4368282];
   const COLORS = ['#007991', '#F9A03F', '#EF476F', '#118AB2', '#06A77D', '#7B2CBF'];
+  const STOP_RADIUS = { normal: 5, terminal: 8 };
+  const ARROW_STEP_THRESHOLD = 10;
+
+  // Rumbo (0-360°, 0 = norte, sentido horario) entre dos puntos lat/lng.
+  // Igual que en routesOverviewMap.js — suficiente para un mapa a escala
+  // de ciudad, no requiere proyección exacta.
+  function bearingDegrees(a, b) {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x =
+      Math.cos(lat1) * Math.sin(lat2) -
+      Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    const deg = (Math.atan2(y, x) * 180) / Math.PI;
+    return (deg + 360) % 360;
+  }
+
+  // Ícono de flecha (chevron) rotado según el rumbo del tramo.
+  function buildArrowIcon(color, angleDeg) {
+    return L.divIcon({
+      className: '',
+      html: `<div style="width:16px;height:16px;transform:rotate(${angleDeg}deg);transform-origin:50% 50%;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))">
+        <svg width="16" height="16" viewBox="0 0 24 24">
+          <path d="M12 3 L19.5 19 L12 14.5 L4.5 19 Z" fill="${color}" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round" />
+        </svg>
+      </div>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+  }
+
+  // Flechas <> a lo largo del trazado que muestran hacia dónde avanza la
+  // ruta. En trazados largos se muestra una de cada dos para no saturar.
+  function buildDirectionArrows(orderedPoints, color) {
+    const step = orderedPoints.length > ARROW_STEP_THRESHOLD ? 2 : 1;
+    const markers = [];
+    for (let i = 0; i < orderedPoints.length - 1; i += step) {
+      const a = orderedPoints[i];
+      const b = orderedPoints[i + 1];
+      const mid = { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+      const angle = bearingDegrees(a, b);
+      markers.push(
+        L.marker([mid.lat, mid.lng], {
+          icon: buildArrowIcon(color, angle),
+          interactive: false,
+          keyboard: false,
+        }),
+      );
+    }
+    return markers;
+  }
+
+  // Círculo de parada: sólido y pequeño para paradas normales; anillo hueco
+  // y un poco más grande para el punto de inicio (misma convención visual
+  // que /ruta: referencia clara de "aquí comienza el recorrido").
+  function buildStopMarker(point, color, { isTerminal, label }) {
+    const marker = L.circleMarker([point.lat, point.lng], {
+      radius: isTerminal ? STOP_RADIUS.terminal : STOP_RADIUS.normal,
+      weight: isTerminal ? 3 : 2,
+      color: isTerminal ? color : '#ffffff',
+      fillColor: isTerminal ? '#ffffff' : color,
+      fillOpacity: 0.9,
+      opacity: 0.9,
+    });
+    if (label) marker.bindTooltip(label, { direction: 'top', offset: [0, -6] });
+    return marker;
+  }
 
   const root = document.getElementById('related-routes-root');
   const mapEl = document.getElementById('related-routes-map');
@@ -519,13 +588,32 @@ const shareText = encodeURIComponent(article.title);
 
         const line = L.polyline(latlngs, { color, weight: 4, opacity: 0.85 }).addTo(map);
         line.bindPopup(`<strong>Ruta ${route.routeNumber}</strong>${route.name ? ` — ${route.name}` : ''}`);
-        return line;
+
+        // --- Flechas de sentido a lo largo del trazado ---
+        const arrowMarkers = buildDirectionArrows(routePoints, color);
+        arrowMarkers.forEach((m) => m.addTo(map));
+
+        // --- Paradas (círculos): solo los puntos que no son "solo trazado" ---
+        const boardablePoints = points.filter((p) => !p.skipStop);
+        const stopMarkers = boardablePoints.map((point, stopIndex) => {
+          const isTerminal = stopIndex === 0 && !route.isLoop;
+          const marker = buildStopMarker(point, color, {
+            isTerminal,
+            label: isTerminal
+              ? `Ruta ${route.routeNumber} — inicio de ruta`
+              : `Ruta ${route.routeNumber} — parada ${stopIndex + 1}`,
+          });
+          marker.addTo(map);
+          return marker;
+        });
+
+        return { line, arrowMarkers, stopMarkers };
       });
 
       const validLayers = routeLayers.filter(Boolean);
       const fitAll = () => {
         if (validLayers.length === 0) return;
-        const group = L.featureGroup(validLayers);
+        const group = L.featureGroup(validLayers.map((l) => l.line));
         map.fitBounds(group.getBounds(), { padding: [30, 30] });
       };
       fitAll();
@@ -541,8 +629,8 @@ const shareText = encodeURIComponent(article.title);
           );
           btn.classList.add('border-ar-cerulean', 'bg-ar-cerulean-disabled/40');
 
-          map.fitBounds(layer.getBounds(), { padding: [40, 40] });
-          layer.openPopup(layer.getBounds().getCenter());
+          map.fitBounds(layer.line.getBounds(), { padding: [40, 40] });
+          layer.line.openPopup(layer.line.getBounds().getCenter());
         });
       });
 

@@ -1,5 +1,6 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { renderFavoriteStarHtml } from "./routeFavorites.js";
 
 const ATLIXCO_CENTER = [18.9099148, -98.4368282];
 const DEFAULT_ZOOM = 15;
@@ -76,14 +77,61 @@ function nearestPointIndex(points, target) {
   return { index: bestIndex, distance: bestDistance };
 }
 
-async function fetchOsrmPath(baseUrl, points) {
+// --- Caminata via Google Routes API (con OSRM como respaldo) ---------------
+//
+// Se usa el endpoint propio /api/walk-directions (proxy server-side hacia
+// Google Routes API, modo WALK) como motor principal para los tramos de
+// caminata: es mas rapido que Overpass, no tiene limite de uso publico
+// compartido, y ya resuelve internamente "caminata ignora sentido
+// vehicular" sin que tengamos que mantener un grafo/Dijkstra propios. Si
+// el endpoint falla (red, cuota, configuracion), se cae a OSRM con
+// alternativas + menor distancia como respaldo, para no dejar el tramo
+// sin dibujar.
+async function fetchGoogleWalkPath(points) {
+  try {
+    const origin = points[0];
+    const destination = points[points.length - 1];
+    const res = await fetch("/api/walk-directions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origin, destination }),
+    });
+    if (!res.ok) {
+      console.warn(`/api/walk-directions respondio ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    if (!data?.polyline) return null;
+    return decodePolyline(data.polyline);
+  } catch (error) {
+    console.error("Error consultando /api/walk-directions:", error);
+    return null;
+  }
+}
+
+async function fetchWalkPath(points) {
+  const googlePath = await fetchGoogleWalkPath(points);
+  if (googlePath) return googlePath;
+
+  console.warn("Google Directions no disponible, usando OSRM como respaldo.");
+  return await fetchOsrmPath(OSRM_FOOT_URL, points, { alternatives: true });
+}
+
+async function fetchOsrmPath(baseUrl, points, { alternatives = false } = {}) {
   try {
     const coordinates = points.map((p) => `${p.lng},${p.lat}`).join(";");
-    const url = `${baseUrl}${coordinates}?overview=full&geometries=polyline`;
+    const altParam = alternatives ? "&alternatives=true" : "";
+    const url = `${baseUrl}${coordinates}?overview=full&geometries=polyline${altParam}`;
     const res = await fetch(url);
     const data = await res.json();
-    if (data.code === "Ok" && data.routes?.[0]?.geometry) {
-      return decodePolyline(data.routes[0].geometry);
+    if (data.code === "Ok" && data.routes?.length) {
+      const bestRoute = alternatives
+        ? data.routes.reduce(
+            (best, r) => (r.distance < best.distance ? r : best),
+            data.routes[0],
+          )
+        : data.routes[0];
+      return decodePolyline(bestRoute.geometry);
     }
   } catch (error) {
     console.error(`Error consultando OSRM (${baseUrl}):`, error);
@@ -140,21 +188,22 @@ function buildBoardingSegment(route, boardIndex, alightIndex) {
   if (boardIndex < alightIndex) {
     const indices = [];
     for (let i = boardIndex; i <= alightIndex; i++) indices.push(i);
-    return { indices, reversed: false };
+    return { indices };
   }
 
   if (route.isLoop) {
     const indices = [];
     for (let i = boardIndex; i < n; i++) indices.push(i);
     for (let i = 0; i <= alightIndex; i++) indices.push(i);
-    return { indices, reversed: false };
+    return { indices };
   }
 
-  // Ruta no circular y el destino queda "antes" en el trazado: solo tiene
-  // sentido si se toma en direccion contraria (vuelta).
-  const indices = [];
-  for (let i = boardIndex; i >= alightIndex; i--) indices.push(i);
-  return { indices, reversed: true };
+  // Ruta no circular y el destino queda "antes" en el trazado: esta ruta
+  // no puede llevar al pasajero ahi. No existe "vuelta" implicita — el
+  // camion solo circula en el sentido en que fue trazada la plantilla.
+  // Se descarta como candidata en vez de simular un recorrido inverso
+  // que no corresponde a ningun servicio real.
+  return null;
 }
 
 function segmentDistanceMeters(route, indices) {
@@ -199,6 +248,7 @@ export class RouteFinderApp {
     statusContainer,
     mapErrorContainer,
     onSelectingChange,
+    favoriteIds,
   }) {
     this.routes = routes ?? [];
     this.startInput = startInput;
@@ -214,6 +264,7 @@ export class RouteFinderApp {
     this.statusContainer = statusContainer;
     this.mapErrorContainer = mapErrorContainer;
     this.onSelectingChange = onSelectingChange ?? (() => {});
+    this.favoriteIds = new Set(favoriteIds ?? []);
 
     this.start = null; // { lat, lng, label }
     this.end = null;
@@ -255,7 +306,7 @@ export class RouteFinderApp {
       ).addTo(this.map);
 
       this.markersLayer = L.layerGroup().addTo(this.map);
-      this.routeLayer = L.layerGroup().addTo(this.map);
+      this.routeLayer = L.featureGroup().addTo(this.map);
 
       this.map.on("click", (e) => this.handleMapClick(e.latlng));
 
@@ -580,51 +631,59 @@ export class RouteFinderApp {
     this.resultsContainer.innerHTML = this.recommendations
       .map((rec, i) => {
         const walkWarning = rec.totalWalk > WALK_WARNING_METERS;
+        const isFavorite = this.favoriteIds.has(rec.route.groupId);
+        // Envoltura relative + botón de estrella absoluto en la esquina:
+        // el botón de "seleccionar" ocupa toda la tarjeta como antes, y la
+        // estrella queda encima como hermano (nunca anidada dentro de otro
+        // <button>, que es HTML inválido y rompería su propio clic).
         return `
-      <button type="button" data-idx="${i}"
-        class="w-full text-left p-4 rounded-md border transition-colors cursor-pointer ${
-          i === 0
-            ? "border-ar-cerulean bg-ar-cerulean-disabled"
-            : "border-gray-200 hover:bg-gray-50"
-        }">
-        <div class="flex justify-between items-start gap-2">
-          <div class="flex items-start gap-2">
-            <span class="mt-0.5 shrink-0 w-6 h-6 rounded-md bg-ar-oxford text-white flex items-center justify-center">
-              ${busIcon}
-            </span>
-            <div>
-              <p class="font-bold text-ar-oxford">Ruta ${rec.route.routeNumber}${
-                rec.route.name ? ` — ${rec.route.name}` : ""
-              }</p>
-              <p class="text-xs text-ar-oxford-disabled mt-0.5">${rec.route.label}${
-                rec.reversed ? " (sentido contrario)" : ""
-              }</p>
+      <div class="relative">
+        <button type="button" data-select-idx="${i}"
+          class="w-full text-left p-4 pr-12 rounded-md border transition-colors cursor-pointer ${
+            i === 0
+              ? "border-ar-cerulean bg-ar-cerulean-disabled"
+              : "border-gray-200 hover:bg-gray-50"
+          }">
+          <div class="flex justify-between items-start gap-2">
+            <div class="flex items-start gap-2">
+              <span class="mt-0.5 shrink-0 w-6 h-6 rounded-md bg-ar-oxford text-white flex items-center justify-center">
+                ${busIcon}
+              </span>
+              <div>
+                <p class="font-bold text-ar-oxford">Ruta ${rec.route.routeNumber}${
+                  rec.route.name ? ` — ${rec.route.name}` : ""
+                }</p>
+                <p class="text-xs text-ar-oxford-disabled mt-0.5">${rec.route.label}${
+                  rec.reversed ? " (sentido contrario)" : ""
+                }</p>
+              </div>
             </div>
+            <span class="shrink-0 flex items-center gap-1 text-xs font-semibold bg-ar-oxford text-white px-2 py-1 rounded-full">
+              ${clockIcon} ~${rec.estimatedMinutes} min
+            </span>
           </div>
-          <span class="shrink-0 flex items-center gap-1 text-xs font-semibold bg-ar-oxford text-white px-2 py-1 rounded-full">
-            ${clockIcon} ~${rec.estimatedMinutes} min
-          </span>
-        </div>
-        <div class="mt-2 text-sm text-ar-oxford-disabled space-y-1">
-          <p class="flex items-center gap-1.5">${walkIcon} Camina ${formatDistance(rec.walkToBoard)} hasta el punto de abordaje</p>
-          <p class="flex items-center gap-1.5">${busIcon} Recorrido en camión: ${formatDistance(rec.busDistance)}</p>
-          <p class="flex items-center gap-1.5">${walkIcon} Camina ${formatDistance(rec.walkFromAlight)} desde la bajada hasta tu destino</p>
-        </div>
-        ${
-          walkWarning
-            ? `<p class="mt-2 flex items-center gap-1.5 text-xs text-ar-folly font-semibold">${warningIcon} Esta ruta implica una caminata considerable.</p>`
-            : ""
-        }
-      </button>`;
+          <div class="mt-2 text-sm text-ar-oxford-disabled space-y-1">
+            <p class="flex items-center gap-1.5">${walkIcon} Camina ${formatDistance(rec.walkToBoard)} hasta el punto de abordaje</p>
+            <p class="flex items-center gap-1.5">${busIcon} Recorrido en camión: ${formatDistance(rec.busDistance)}</p>
+            <p class="flex items-center gap-1.5">${walkIcon} Camina ${formatDistance(rec.walkFromAlight)} desde la bajada hasta tu destino</p>
+          </div>
+          ${
+            walkWarning
+              ? `<p class="mt-2 flex items-center gap-1.5 text-xs text-ar-folly font-semibold">${warningIcon} Esta ruta implica una caminata considerable.</p>`
+              : ""
+          }
+        </button>
+        <span class="absolute top-3 right-3">${renderFavoriteStarHtml(rec.route.groupId, isFavorite)}</span>
+      </div>`;
       })
       .join("");
 
     this.resultsContainer
-      .querySelectorAll("button[data-idx]")
+      .querySelectorAll("button[data-select-idx]")
       .forEach((btn) => {
         btn.addEventListener("click", () => {
           this.selectRecommendation(
-            this.recommendations[Number(btn.dataset.idx)],
+            this.recommendations[Number(btn.dataset.selectIdx)],
           );
         });
       });
@@ -685,16 +744,17 @@ export class RouteFinderApp {
         ).addTo(this.routeLayer)
       : null;
 
-    // Se piden los tres tramos en paralelo: caminata (perfil peaton) hacia la
-    // parada, caminata (perfil peaton) desde la bajada, y el recorrido en
-    // camion (perfil vehicular). La caminata no respeta sentidos de
-    // circulacion, pero igual debe trazarse siguiendo las calles reales en
-    // vez de una linea recta que atraviese manzanas.
+    // Se piden los tres tramos en paralelo: caminata hacia la parada,
+    // caminata desde la bajada, y el recorrido en camion (perfil
+    // vehicular). Los tramos de caminata pasan por fetchWalkPath, que
+    // calcula el camino mas corto real calle por calle sobre un grafo
+    // propio construido a partir de OSM (sin ninguna restriccion de
+    // sentido vehicular), usando OSRM solo como respaldo si ese calculo
+    // falla. El tramo en camion sigue el trazado fijo del RouteGroup y no
+    // necesita ninguno de estos ajustes.
     const [walkToBoardPath, walkFromAlightPath, busPath] = await Promise.all([
-      this.start
-        ? fetchOsrmPath(OSRM_FOOT_URL, [this.start, boardPoint])
-        : null,
-      this.end ? fetchOsrmPath(OSRM_FOOT_URL, [alightPoint, this.end]) : null,
+      this.start ? fetchWalkPath([this.start, boardPoint]) : null,
+      this.end ? fetchWalkPath([alightPoint, this.end]) : null,
       fetchOsrmPath(OSRM_URL, segmentCoords),
     ]);
 

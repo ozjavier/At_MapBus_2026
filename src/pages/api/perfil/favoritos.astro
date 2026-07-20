@@ -1,0 +1,69 @@
+---
+import ProfileLayout from '../../layouts/ProfileLayout.astro';
+import { requireUser } from '../../lib/guards.js';
+import { listFavoritesByUser } from '../../lib/routeFavorites.js';
+
+const guardResponse = requireUser(Astro);
+if (guardResponse) return guardResponse;
+
+const favorites = await listFavoritesByUser(Astro.locals.user.id);
+const favoritesJson = JSON.stringify(favorites);
+---
+
+<ProfileLayout title="Favoritos" active="favoritos">
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold">Rutas Favoritas</h1>
+    <p class="text-sm text-ar-oxford-disabled mt-1">
+      Accede rápido a tus rutas guardadas y decide si quieres avisos cuando cambien.
+    </p>
+  </div>
+
+  <div id="favorites-root" data-favorites={favoritesJson}>
+    <div id="favorites-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+
+    <div
+      id="favorites-empty"
+      class="hidden border border-dashed border-ar-cerulean-disabled rounded-lg p-10 text-center text-ar-oxford-disabled"
+    >
+      <p class="font-semibold">Aún no tienes rutas favoritas</p>
+      <p class="text-sm mt-1">
+        Explora el <a href="/rutas" class="text-ar-cerulean hover:underline">mapa de rutas</a> o
+        <a href="/buscar-ruta" class="text-ar-cerulean hover:underline">busca tu ruta</a> para guardar tus preferidas.
+      </p>
+    </div>
+  </div>
+</ProfileLayout>
+
+<script>
+  import { RoutesOverviewMap } from '../../lib/client/routesOverviewMap.js';
+  import { initFavoriteStars } from '../../lib/client/routeFavorites.js';
+
+  const root = document.getElementById('routes-overview-root');
+  const routes = JSON.parse(root?.dataset.routes ?? '[]');
+  const favoriteIds = JSON.parse(root?.dataset.favoriteIds ?? '[]');
+  const isLoggedIn = root?.dataset.loggedIn === 'true';
+
+  initFavoriteStars({ isLoggedIn, loginRedirectPath: window.location.pathname });
+
+  const app = new RoutesOverviewMap({
+    mapContainer: document.getElementById('routes-map'),
+    routes,
+    listContainer: document.getElementById('routes-list'),
+    mapErrorContainer: document.getElementById('map-error'),
+    emptyStateContainer: document.getElementById('routes-empty'),
+    favoriteIds,
+  });
+
+  // Viene de /perfil/favoritos ("Ver en el mapa"): si el grupo existe
+  // como línea dibujada, lo resalta igual que un clic en la lista.
+  const highlightId = new URLSearchParams(window.location.search).get('highlight');
+  if (highlightId && app.lines?.has(highlightId)) {
+    app.selectRoute(highlightId);
+    document
+      .querySelector(`#routes-list [data-group-id="${highlightId}"]`)
+      ?.scrollIntoView({ block: 'center' });
+  }
+
+  // Referencia disponible en consola para depuración manual si hace falta.
+  window.__routesOverviewApp = app;
+</script>
